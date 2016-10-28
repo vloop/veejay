@@ -366,6 +366,9 @@ static void vj_effman_apply_image_effect(
 	contourextract_apply( vj_effects[entry]->user_data, frames[0],
 	                     arg[0], arg[1], arg[2], arg[3], arg[4], arg[5]);
 	break;
+     case VJ_IMAGE_EFFECT_KALEIDOSCOPE:
+	kaleidoscope_apply(frames[0], arg[0]);
+	break;
      case VJ_IMAGE_EFFECT_SLICE:
 	if(arg[2] > 0) { 
 	   todo_info->tmp[0] ++; 

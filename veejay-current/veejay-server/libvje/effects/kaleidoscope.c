@@ -43,32 +43,37 @@ vj_effect *kaleidoscope_init(int w, int h)
 
 static void kaleidoscope(uint8_t * yuv[3], int width, int height)
 {
-	unsigned int x, y;
-
-	unsigned int yi, yi2;
-	const unsigned int hlen = height / 2;
+	unsigned int x, xmin, xmax, yr;
+        // x absolu
+        // yr relatif à la base 
+	unsigned int yi; // offset dans le tableau
 	uint8_t p, cb, cr;
 	const float sin60 = sin(M_PI/3);
-	const float cos60 = cos(M_PI/3);
+	// const float cos60 = cos(M_PI/3);
+	// const float tan30 = tan(M_PI/6);
+        // centre de l'écran:
+        const unsigned int yc = height/2;
+	const unsigned int xc = width/2;
+        // Largeur et hauteur du triangle
+	const unsigned int wt = width/2;
+	const unsigned int ht = wt*sin60;
+        // x se décale de la moitié de la largeur pendant que y parcourt la hauteur
+        const float xpente=0.5*wt/ht;
+        // todo tronquer si le triangle dépasse l'écran	
+        // x0, y0 angle supérieur gauche
+        const unsigned int y0=yc-ht/2;
+        const unsigned int x0=xc-wt/2;
+	for (yr = 0; yr < ht; yr++) {
+		yi = (y0+yr) * width;
+                xmin=x0+yr*xpente;
+                xmax=x0+wt-yr*xpente;
+		for (x = xmin; x < xmax; x++) {
+			yuv[0][yi+x] = 255;
 
-	for (y = hlen; y < height; y++) {
-		unsigned int vlen = y/2;
-
-		yi = y * width;
-		yi2 = (y * sin60 + x * cos60) * width;
-		for (x = 0; x < vlen ; x++) {
-			
-			unsigned int x2 = -x * sin60 + y * cos60;
-			
-
-			p = yuv[0][yi2 + x2];
-			yuv[0][yi + x ] = p;
-			yuv[0] = 255;
-
-			cb = yuv[1][yi2 + x2];
-			cr = yuv[2][yi2 + x2];
-			yuv[1][yi + x] = cb;
-			yuv[2][yi + x] = cr;
+			/* cb = yuv[1][yi + x];
+			cr = yuv[2][yi + x]; */
+			/* yuv[1][yi + x] = cb;
+			yuv[2][yi + x] = cr; */
 			
 		}
 	}
