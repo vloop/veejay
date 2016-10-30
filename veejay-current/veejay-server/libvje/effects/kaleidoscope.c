@@ -43,10 +43,10 @@ vj_effect *kaleidoscope_init(int w, int h)
 
 static void kaleidoscope(uint8_t * yuv[3], int width, int height)
 {
-	unsigned int x, xmin, xmax, yr;
+	unsigned int x, xmin, xmax, y, yr;
         // x absolu
         // yr relatif à la base 
-	unsigned int yi; // offset dans le tableau
+	unsigned int yi, yi2; // offset dans le tableau
 	uint8_t p, cb, cr;
 	const float sin60 = sin(M_PI/3);
 	// const float cos60 = cos(M_PI/3);
@@ -63,20 +63,55 @@ static void kaleidoscope(uint8_t * yuv[3], int width, int height)
         // x0, y0 angle supérieur gauche
         const unsigned int y0=yc-ht/2;
         const unsigned int x0=xc-wt/2;
+	// center triangle
 	for (yr = 0; yr < ht; yr++) {
 		yi = (y0+yr) * width;
                 xmin=x0+yr*xpente;
                 xmax=x0+wt-yr*xpente;
-		for (x = xmin; x < xmax; x++) {
-			yuv[0][yi+x] = 255;
+		yuv[0][yi+xmin] = 255;
+		yuv[0][yi+xmax] = 255;
+		// for (x = xmin; x < xmax; x++) {
+			// yuv[0][yi+x] = 255;
 
 			/* cb = yuv[1][yi + x];
 			cr = yuv[2][yi + x]; */
 			/* yuv[1][yi + x] = cb;
 			yuv[2][yi + x] = cr; */
 			
-		}
+		// }
 	}
+	// top triangle
+	unsigned int ymin=1;
+	if (y0>ht) ymin=y0-ht;
+	for (y = y0; y > ymin; y--) {
+	        yi=y * width;
+	        yr=y0-y;
+		yi2=(y0+yr) * width;
+                xmin=x0+yr*xpente;
+                xmax=x0+wt-yr*xpente;
+		for (x = xmin; x < xmax; x++) {
+			yuv[0][yi+x] = yuv[0][yi2+x];
+			yuv[1][yi+x] = yuv[1][yi2+x];
+			yuv[2][yi+x] = yuv[2][yi2+x];			
+		}    
+	}
+	// bottom triangle
+	unsigned int ymax=y0+ht+ht;
+	if (ymax>height) ymax=height-1;
+	for (y = y0+ht; y < ymax; y++) {
+	        yi=y * width;
+	        yr=y-(y0+ht);
+		yi2=(y0+ht-yr) * width;
+                xmin=xc-yr*xpente;
+                xmax=xc+yr*xpente;
+		for (x = xmin; x < xmax; x++) {
+			yuv[0][yi+x] = yuv[0][yi2+x];
+			yuv[1][yi+x] = yuv[1][yi2+x];
+			yuv[2][yi+x] = yuv[2][yi2+x];
+		}    
+	}
+	
+	
 }
 
 void kaleidoscope_apply( VJFrame *frame, int type)
