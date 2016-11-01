@@ -22,27 +22,37 @@
 #include <libvjmem/vjmem.h>
 #include "kaleidoscope.h"
 
+static int frame_index = 0; // TODO refactor malloc/prepare
+
 vj_effect *kaleidoscope_init(int w, int h)
 {
 
 	vj_effect *ve = (vj_effect *) vj_calloc(sizeof(vj_effect));
-	ve->num_params = 1;
+	ve->num_params = 2;
 	ve->defaults = (int *) vj_calloc(sizeof(int) * ve->num_params);	/* default values */
 	ve->limits[0] = (int *) vj_calloc(sizeof(int) * ve->num_params);	/* min */
 	ve->limits[1] = (int *) vj_calloc(sizeof(int) * ve->num_params);	/* max */
 	ve->defaults[0] = 0;
-	ve->limits[0][0] = 0;	/* horizontal or vertical mirror */
-	ve->limits[1][0] = 0;
+	ve->defaults[1] = w/2;
+	ve->limits[0][0] = 0;	/* no border or border*/
+	ve->limits[1][0] = 1;
+	ve->limits[0][1] = 0;	/* triangle size */
+	ve->limits[1][1] = w; // TODO fix max size to w*2
+
 	ve->sub_format = 1;
 	ve->description = "Kaleidoscope !";
 	ve->extra_frame = 0;
 	ve->has_user = 0;
-	ve->param_description = vje_build_param_list(ve->num_params, "H or V mode");
+	ve->param_description = vje_build_param_list(ve->num_params, "Border", "Triangle size");
 	return ve;
 }
 
-static void kaleidoscope(uint8_t * yuv[3], int width, int height)
+static void kaleidoscope( VJFrame* frame, int border, int size)
 {
+	uint8_t ** yuv = frame->data;
+	int width = frame->width;
+	int height = frame->height;
+	double timecode = frame->timecode;
 ///////////////////////////////////////////////////////////////////////////////
   // debugging functions to display digits - should be moved
 	int setsegments (const int segments, const int x0, const int y0, const int seglen, const int Y, const int Cb, const int Cr){
@@ -141,10 +151,10 @@ static void kaleidoscope(uint8_t * yuv[3], int width, int height)
 	// showhexdigits(0xCDEF, xc, yc-9*seglen, seglen, 255, 0, 0);
 
 ///////////////////////////////////////////////////////////////////////////////
-        int with_border=1;
+	int with_border=border;
 	int x, xmin, xmax, y, yr;
-        // x absolute
-        // yr relative to triangle base 
+	// x absolute
+	// yr relative to triangle base 
 	unsigned int yi, yi2; // offset dans le tableau
 	uint8_t cb, cr;
 	const float sin60 = sin(M_PI/3);
@@ -152,19 +162,19 @@ static void kaleidoscope(uint8_t * yuv[3], int width, int height)
 	// const float tan30 = tan(M_PI/6);
 	const float sin2a = sin(2*M_PI/3);
 	const float cos2a = cos(2*M_PI/3);
-		
-        // centre of the picture:
-        const unsigned int yc = height/2;
+
+	// centre of the picture:
+	const unsigned int yc = height/2;
 	const unsigned int xc = width/2;
-        // Width and height of the triangle
-	const unsigned int wt = width/2;
+	// Width and height of the triangle
+	const unsigned int wt = size; //width/2;
 	const unsigned int ht = wt*sin60;
-        // x changes by half the triangle width while y moves across the triangle height
-        const float xpente=0.5*wt/ht;
-        // todo truncate if triangle is bigger than picture area
-        // x0, y0 top left angle of the triangle
-        const unsigned int y0=yc-ht/2;
-        const unsigned int x0=xc-wt/2;
+	// x changes by half the triangle width while y moves across the triangle height
+	const float xpente=0.5*wt/ht;
+	// todo truncate if triangle is bigger than picture area
+	// x0, y0 top left angle of the triangle
+	const unsigned int y0=yc-ht/2;
+	const unsigned int x0=xc-wt/2;
 
 	const unsigned int seglen=12, lineheigth=3*seglen;
 	x=xc-3*seglen;
@@ -174,12 +184,19 @@ static void kaleidoscope(uint8_t * yuv[3], int width, int height)
 	y-=lineheigth;
 	showhexdigits(0x4567, x, y, seglen, 255, 255, 0);
 	showhexdigits(0x4567, x+1, y+1, seglen, 255, 255, 0);
-	y-=lineheigth;
+/*	y-=lineheigth;
 	showhexdigits(0x89AB, x, y, seglen, 255, 0, 255);
 	showhexdigits(0x89AB, x+1, y+1, seglen, 255, 0, 255);
 	y-=lineheigth;
 	showhexdigits(0xCDEF, x, y, seglen, 255, 255, 255);
 	showhexdigits(0xCDEF, x+1, y+1, seglen, 255, 255, 255);
+*/	y-=lineheigth;
+	showhexdigits(frame_index, x, y, seglen, 0, 255, 255);
+	showhexdigits(frame_index, x+1, y+1, seglen, 0, 255, 255);
+	y-=lineheigth;
+	showhexdigits((int)timecode, x, y, seglen, 0, 0, 255);
+	showhexdigits((int)timecode, x+1, y+1, seglen, 0, 0, 255);
+
 
 	// center triangle - draw sides
 	if (with_border){
@@ -206,7 +223,7 @@ static void kaleidoscope(uint8_t * yuv[3], int width, int height)
 	  }
 	}
 	// top triangle
-	unsigned int ymin=1;
+	unsigned int ymin=0;
 	if (y0>ht) ymin=y0-ht;
 	for (y = y0; y > ymin; y--) {
 	        yi=y * width;
@@ -217,20 +234,20 @@ static void kaleidoscope(uint8_t * yuv[3], int width, int height)
 		for (x = xmin; x <= xmax; x++) {
 			yuv[0][yi+x] = yuv[0][yi2+x];
 			yuv[1][yi+x] = yuv[1][yi2+x];
-			yuv[2][yi+x] = yuv[2][yi2+x];			
-		}    
+			yuv[2][yi+x] = yuv[2][yi2+x];
+		}
 	}
 	// bottom triangle
 	unsigned int ymax=y0+ht+ht;
 	if (ymax>height) ymax=height;
 	for (y = y0+ht; y < ymax; y++) {
-	        yi=y * width;
-	        yr=y-(y0+ht);
+		yi=y * width;
+		yr=y-(y0+ht);
 		yi2=(y0+ht-yr) * width;
-                xmin=xc-yr*xpente;
-                xmax=xc+yr*xpente;
+		xmin=xc-yr*xpente;
+		xmax=xc+yr*xpente;
 		for (x = xmin; x <= xmax; x++) {
-		        /* central symmetry
+			/* central symmetry
 			yuv[0][yi+x] = yuv[0][yi2+width-x];
 			yuv[1][yi+x] = yuv[1][yi2+width-x];
 			yuv[2][yi+x] = yuv[2][yi2+width-x];
@@ -242,11 +259,13 @@ static void kaleidoscope(uint8_t * yuv[3], int width, int height)
 		}    
 	}
 	// left triangle 1
+	
 	for (yr = 0; yr < ht; yr++) {
 		yi = (y0+yr) * width;
-                xmin=x0-wt-yr*xpente;
-		if (xmin<0) xmin=0;
-                xmax=x0+yr*xpente;
+		xmin=x0-wt-yr*xpente;
+		if (xmin<0)
+			xmin=0;
+		xmax=x0+yr*xpente;
 		if(with_border){
 		  // Draw sides
 		  yuv[0][yi+xmin] = 255;
@@ -255,7 +274,7 @@ static void kaleidoscope(uint8_t * yuv[3], int width, int height)
 		  yuv[1][yi+xmax] = 255;
 		}
 		for (x = xmin; x < xmax; x++) {
-		        int xr, x2, y2, xr2, yr2, yi2;
+			int xr, x2, y2, xr2, yr2, yi2;
 			xr = x-x0;
 			xr2=xr*cos2a+yr*sin2a;
 			yr2=xr*sin2a-yr*cos2a;
@@ -272,9 +291,10 @@ static void kaleidoscope(uint8_t * yuv[3], int width, int height)
 	// left triangle 2
 	for (yr = 0; yr < ht; yr++) {
 		yi = (y0+yr) * width;
-                xmin=x0-wt+yr*xpente;
-		if (xmin<0) xmin=0;
-                xmax=x0-yr*xpente;
+		xmin=x0-wt+yr*xpente;
+		if (xmin<0)
+			xmin=0;
+		xmax=x0-yr*xpente;
 		if(with_border){
 		  // Draw sides
 		  yuv[0][yi+xmin] = 255;
@@ -283,7 +303,7 @@ static void kaleidoscope(uint8_t * yuv[3], int width, int height)
 		  yuv[1][yi+xmax] = 255;
 		}
 		for (x = xmin; x < xmax; x++) {
-		        int xr, x2, y2, xr2, yr2, yi2;
+			int xr, x2, y2, xr2, yr2, yi2;
 			xr = x-x0;
 			xr2=xr*cos2a+yr*sin2a;
 			yr2=xr*sin2a-yr*cos2a;
@@ -356,11 +376,8 @@ static void kaleidoscope(uint8_t * yuv[3], int width, int height)
 
 }
 
-void kaleidoscope_apply( VJFrame *frame, int type)
+void kaleidoscope_apply( VJFrame *frame, int border, int size)
 {
-	switch (type) {
-		case 0:
-			kaleidoscope(frame->data, frame->width, frame->height);
-		break;
-	}
+	kaleidoscope(frame, border, size);
+	frame_index++;
 }
