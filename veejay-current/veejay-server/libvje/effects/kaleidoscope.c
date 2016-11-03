@@ -47,14 +47,17 @@ vj_effect *kaleidoscope_init(int w, int h)
 	return ve;
 }
 
-static void kaleidoscope( VJFrame* frame, int border, int size)
+static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const int wt)
 {
 	uint8_t ** yuv = frame->data;
 	int width = frame->width;
 	int height = frame->height;
 	double timecode = frame->timecode;
 ///////////////////////////////////////////////////////////////////////////////
-  // debugging functions to display digits - should be moved
+	
+  /////////////////////////////////////////////////////////////
+  // debugging functions to display digits - should be moved //
+  /////////////////////////////////////////////////////////////
 	int setsegments (const int segments, const int x0, const int y0, const int seglen, const int Y, const int Cb, const int Cr){
 	  // 0..5 (abcdef) clockwise from top, 6 (g) dash, 7 dot
 	  // if (segnum>7) return(1);
@@ -151,229 +154,479 @@ static void kaleidoscope( VJFrame* frame, int border, int size)
 	// showhexdigits(0xCDEF, xc, yc-9*seglen, seglen, 255, 0, 0);
 
 ///////////////////////////////////////////////////////////////////////////////
-	int with_border=border;
-	int x, xmin, xmax, y, yr;
-	// x absolute
-	// yr relative to triangle base 
-	unsigned int yi, yi2; // offset dans le tableau
-	uint8_t cb, cr;
+
 	const float sin60 = sin(M_PI/3);
 	// const float cos60 = cos(M_PI/3);
 	// const float tan30 = tan(M_PI/6);
 	const float sin2a = sin(2*M_PI/3);
 	const float cos2a = cos(2*M_PI/3);
+	const float sin4a = sin(4*M_PI/3);
+	const float cos4a = cos(4*M_PI/3);
 
-	// centre of the picture:
-	const unsigned int yc = height/2;
-	const unsigned int xc = width/2;
-	// Width and height of the triangle
-	const unsigned int wt = size; //width/2;
-	const unsigned int ht = wt*sin60;
+	// centre of the picture (absolute):
+	const int yc = height/2;
+	const int xc = width/2;
+	// Height of the triangle
+	const int ht = wt*sin60;
 	// x changes by half the triangle width while y moves across the triangle height
-	const float xpente=0.5*wt/ht;
-	// todo truncate if triangle is bigger than picture area
-	// x0, y0 top left angle of the triangle
-	const unsigned int y0=yc-ht/2;
-	const unsigned int x0=xc-wt/2;
+	const float xslope=0.5*wt/ht;
+	// x0, y0 top left angle of the source triangle
+	const int y0=yc-ht/2;
+	const int x0=xc-wt/2;
+	// x1, y1 top right angle of the source triangle
+	const int y1=yc-ht/2;
+	const int x1=xc+wt/2;
+	// x2, y2 bottom angle of the source triangle
+	const int y2=yc+ht/2;
+	const int x2=xc;
 
+	// general work variables
+	int x, xr, xmin, xmax, y, yr; // ymin, ymax;
+	// x, y, xmin, xmax absolute; xr, yr relative
+	// Signed so that triangle truncate works!!
+	unsigned int yi, yi2; // offset in pixel array
+	// uint8_t cb, cr;
+
+	// Debugging display
 	const unsigned int seglen=12, lineheigth=3*seglen;
 	x=xc-3*seglen;
 	y=yc+lineheigth;
-	showhexdigits(0x0123, x, y, seglen, 255, 0, 0);
-	showhexdigits(0x0123, x+1, y+1, seglen, 255, 0, 0);
+	showhexdigits(wt, x, y, seglen, 255, 0, 0);
+	showhexdigits(wt, x+1, y+1, seglen, 255, 0, 0);
 	y-=lineheigth;
-	showhexdigits(0x4567, x, y, seglen, 255, 255, 0);
-	showhexdigits(0x4567, x+1, y+1, seglen, 255, 255, 0);
-/*	y-=lineheigth;
-	showhexdigits(0x89AB, x, y, seglen, 255, 0, 255);
-	showhexdigits(0x89AB, x+1, y+1, seglen, 255, 0, 255);
+	showhexdigits(y0, x, y, seglen, 255, 255, 0);
+	showhexdigits(y0, x+1, y+1, seglen, 255, 255, 0);
 	y-=lineheigth;
-	showhexdigits(0xCDEF, x, y, seglen, 255, 255, 255);
-	showhexdigits(0xCDEF, x+1, y+1, seglen, 255, 255, 255);
-*/	y-=lineheigth;
 	showhexdigits(frame_index, x, y, seglen, 0, 255, 255);
 	showhexdigits(frame_index, x+1, y+1, seglen, 0, 255, 255);
 	y-=lineheigth;
 	showhexdigits((int)timecode, x, y, seglen, 0, 0, 255);
 	showhexdigits((int)timecode, x+1, y+1, seglen, 0, 0, 255);
 
+	// reflection work variables (s for source)
+	int xs, ys, xrs, yrs, xr2, yr2;
 
-	// center triangle - draw sides
-	if (with_border){
-	  for (yr = 0; yr < ht; yr++) {
-		  yi = (y0+yr) * width;
-		  xmin=x0+yr*xpente;
-		  xmax=x0+wt-yr*xpente;
+	// First horizontal reflections
+	// what if source triangle is out of bounds? can a read cause a core dump?
+	for (yr = 0; yr < ht; yr++) {
+	  y=y0+yr;
+	  if(y>=0 && y<height){
+		yi = y * width;
+		
+	        // left triangle 1
+		xmin=x0-yr*xslope;
+		xmax=x0+yr*xslope;
+		if (xmin<0)
+		  xmin=0;
+		if (xmax<0)
+		  xmax=0;
+		// if (xmax>width) xmax=width; // should not happen on left reflections
+		for (x = xmin; x < xmax; x++) {
+			xr = x - x0;
+			xrs = xr*cos2a + yr*sin2a;
+			yrs = xr*sin2a - yr*cos2a;
+			xs = x0 + xrs;
+			ys = y0 + yrs;
+			if(xs>=0 && xs<width && ys>=0 && ys<height){
+			  yi2 = ys * width;
+			  yuv[0][yi+x] = yuv[0][yi2+xs];
+			  yuv[1][yi+x] = yuv[1][yi2+xs];
+			  yuv[2][yi+x] = yuv[2][yi2+xs];
+			}else{
+			  yuv[0][yi+x] = 0;
+			  yuv[1][yi+x] = 0;
+			  yuv[2][yi+x] = 0;
+			}
+			
+		}
+		if(with_border){
+		  // Draw sides
 		  yuv[0][yi+xmin] = 255;
-		  yuv[0][yi+xmax] = 255;
+		  yuv[1][yi+xmin] = 255;
+		  yuv[2][yi+xmin] = 0;
+		  yuv[0][yi+xmax-1] = 255;
+		  yuv[1][yi+xmax-1] = 255;
+		  yuv[2][yi+xmax-1] = 0;
+	  
+		}
+		
+	        // left triangle 2
+	        // left triangle 1 reflection = source triangle rotation !!
+	        // TODO skip completely if off-screen
+		xmin=x0-wt+yr*xslope;
+		xmax=x0-yr*xslope;
+		if (xmin<0)
+		  xmin=0;
+		if (xmax<0)
+		  xmax=0;
+		if (xmin>width) xmin=width;
+		// if (xmax>width) xmax=width; // should not happen on left reflections
+		for (x = xmin; x < xmax; x++) {
+			xr = x-x0; // <0 for left triangle 2
+			// 180° reflection?
+			// xrs = xr*cos4a - yr*sin4a;
+			// yrs = -xr*sin4a - yr*cos4a;
+			// -120° reflection?
+			// xrs = xr*cos2a - yr*sin2a;
+			// yrs = -xr*sin2a - yr*cos2a;
+			// 180° reflection? ok if top triangle set?
+			// xrs = xr*cos2a + yr*sin2a;
+			// yrs = xr*sin2a - yr*cos2a;
+			// ??
+			// xrs = xr*cos4a + yr*sin4a;
+			// yrs = xr*sin4a - yr*cos4a;
+			// rotation -2a
+			xrs = xr*cos2a + yr*sin2a;
+			yrs = -xr*sin2a + yr*cos2a;
+			xs=x0+xrs;
+			ys=y0+yrs;
+			if(xs>=0 && xs<width && ys>=0 && ys<height){
+			  yi2=width*ys;
+			  yuv[0][yi+x] = yuv[0][yi2+xs];
+			  yuv[1][yi+x] = yuv[1][yi2+xs];
+			  yuv[2][yi+x] = yuv[2][yi2+xs];
+			  
+			  // Highlight source for debugging
+			  // yuv[0][yi2+xs]=0;
+			  // yuv[1][yi2+xs]=0;
+			  // yuv[2][yi2+xs]=0;
+			  
+			}else{
+			  yuv[0][yi+x] = 0;
+			  yuv[1][yi+x] = 0;
+			  yuv[2][yi+x] = 255;
+			}
+		}
+		if(with_border){
+		  // Draw sides
+		  yuv[0][yi+xmin] = 255;
+		  yuv[1][yi+xmin] = 0;
+		  yuv[2][yi+xmin] = 0;
+		  yuv[0][yi+xmax-1] = 255;
+		  yuv[1][yi+xmax-1] = 0;
+		  yuv[2][yi+xmax-1] = 0;
+	  
+		}
+
+		// right triangle 1
+		xmin=x1-yr*xslope;
+		xmax=x1+yr*xslope;
+		// if (xmin<0) xmin=0; // should not happen on right reflections
+		if (xmin>width) xmin=width;
+		if (xmax>width) xmax=width;
+		for (x = xmin; x < xmax; x++) {
+			xr = x - x1;
+			// yr already set correctly
+			xrs = xr*cos2a - yr*sin2a;
+			yrs = - xr*sin2a - yr*cos2a;
+			xs = x1 + xrs;
+			ys = y1 + yrs;
+			if(xs>=0 && xs<width && ys>=0 && ys<height){
+			  yi2 = ys * width;
+			  yuv[0][yi+x] = yuv[0][yi2+xs];
+			  yuv[1][yi+x] = yuv[1][yi2+xs];
+			  yuv[2][yi+x] = yuv[2][yi2+xs];
+			}else{
+			  yuv[0][yi+x] = 0;
+			  yuv[1][yi+x] = 0;
+			  yuv[2][yi+x] = 0;
+			}
+			
+		}
+		if(with_border){
+		  // Draw sides
+		  yuv[0][yi+xmin] = 255;
+		  yuv[1][yi+xmin] = 255;
+		  yuv[2][yi+xmin] = 0;
+		  yuv[0][yi+xmax-1] = 255;
+		  yuv[1][yi+xmax-1] = 255;
+		  yuv[2][yi+xmax-1] = 0;
+	  
+		}
+		
+	        // right triangle 2
+	        // right triangle 1 reflection = source triangle rotation !!
+	        // TODO skip completely if off-screen
+		xmin=x0+wt+yr*xslope;
+		xmax=x0+wt+wt-yr*xslope;
+		if (xmax>width) xmax=width;
+		if (xmin>width) xmin=width;
+		// if (xmax>width) xmax=width; // should not happen on left reflections
+		for (x = xmin; x < xmax; x++) {
+			xr = x-x1; // <0 for left triangle 2
+			// rotation +2a
+			xrs = xr*cos2a - yr*sin2a;
+			yrs = xr*sin2a + yr*cos2a;
+			xs=x1+xrs;
+			ys=y1+yrs;
+			if(xs>=0 && xs<width && ys>=0 && ys<height){
+			  yi2=width*ys;
+			  yuv[0][yi+x] = yuv[0][yi2+xs];
+			  yuv[1][yi+x] = yuv[1][yi2+xs];
+			  yuv[2][yi+x] = yuv[2][yi2+xs];
+			  
+			  // Highlight source for debugging
+			  // yuv[0][yi2+xs]=0;
+			  // yuv[1][yi2+xs]=0;
+			  // yuv[2][yi2+xs]=0;
+			  
+			}else{
+			  yuv[0][yi+x] = 0;
+			  yuv[1][yi+x] = 0;
+			  yuv[2][yi+x] = 255;
+			}
+		}
+		if(with_border){
+		  // Draw sides
+		  yuv[0][yi+xmin] = 255;
+		  yuv[1][yi+xmin] = 0;
+		  yuv[2][yi+xmin] = 0;
+		  yuv[0][yi+xmax-1] = 255;
+		  yuv[1][yi+xmax-1] = 0;
+		  yuv[2][yi+xmax-1] = 0;
+	  
+		}
+	  }
+	}
+
+	for (yr = 0; yr < ht; yr++) {
+	  y=y0+yr;
+	  if(y>=0 && y<height){
+		yi = y * width;
+	        yr2=y-y2; // Relative to bottom of original triangle
+		
+	        // right triangle 3
+	        // right triangle 2 reflection = right triangle 1 rotation !!
+		// needs 1st y loop to be complete, hence has its own y loop
+	        // only left half needed ?
+	        // TODO skip completely if off-screen
+		xmin=x1+wt-yr*xslope; // From top
+		xmax=x1+wt ; // +yr*xslope; // comment out slope for left half only
+		if (xmax>width) xmax=width;
+		if (xmin>width) xmin=width;
+		// if (xmax>width) xmax=width; // should not happen on left reflections
+		for (x = xmin; x < xmax; x++) {
+			xr2 = x-(x2+wt);
+			// rotation -2a
+			xrs = xr2*cos2a + yr2*sin2a;
+			yrs = - xr2*sin2a + yr2*cos2a;
+			xs=x2+wt+xrs;
+			ys=y2+yrs;
+			if(xs>=0 && xs<width && ys>=0 && ys<height){
+			  yi2=width*ys;
+			  yuv[0][yi+x] = yuv[0][yi2+xs];
+			  yuv[1][yi+x] = yuv[1][yi2+xs];
+			  yuv[2][yi+x] = yuv[2][yi2+xs];
+			  
+			  // Highlight source for debugging
+			  // yuv[0][yi2+xs]=0;
+			  // yuv[1][yi2+xs]=0;
+			  // yuv[2][yi2+xs]=0;
+			  
+			}else{
+			  yuv[0][yi+x] = 0;
+			  yuv[1][yi+x] = 0;
+			  yuv[2][yi+x] = 255;
+			}
+		}
+		if(with_border){
+		  // Draw sides
+		  yuv[0][yi+xmin] = 255;
+		  yuv[1][yi+xmin] = 0;
+		  yuv[2][yi+xmin] = 0;
+		  // yuv[0][yi+xmax-1] = 255;
+		  // yuv[1][yi+xmax-1] = 0;
+		  // yuv[2][yi+xmax-1] = 0;
+	  
+		}
+		
+		// left triangle 3
+	        // left triangle 2 reflection = left triangle 2 rotation !!
+	        // TODO skip completely if off-screen
+		xmin=x0-wt; // Right half-triangle only
+		xmax=x0-wt+yr*xslope;
+		if (xmin<0)
+		  xmin=0;
+		if (xmax<0)
+		  xmax=0;
+		// if (xmin>width) xmin=width;
+		// if (xmax>width) xmax=width; // should not happen on left reflections
+		for (x = xmin; x < xmax; x++) {
+			xr2 = x-(x2-wt); // <0 for left triangle 3
+			// rotation -2a
+			xrs = xr2*cos2a - yr2*sin2a;
+			yrs = xr2*sin2a + yr2*cos2a;
+			xs=x2-wt+xrs;
+			ys=y2+yrs;
+			if(xs>=0 && xs<width && ys>=0 && ys<height){
+			  yi2=width*ys;
+			  yuv[0][yi+x] = yuv[0][yi2+xs];
+			  yuv[1][yi+x] = yuv[1][yi2+xs];
+			  yuv[2][yi+x] = yuv[2][yi2+xs];
+			  
+			  // Highlight source for debugging
+			  // yuv[0][yi2+xs]=0;
+			  // yuv[1][yi2+xs]=0;
+			  // yuv[2][yi2+xs]=0;
+			  
+			}else{
+			  yuv[0][yi+x] = 0;
+			  yuv[1][yi+x] = 0;
+			  yuv[2][yi+x] = 255;
+			}
+		}
+		if(with_border){
+		  // Draw sides
+		  // yuv[0][yi+xmin] = 255;
+		  // yuv[1][yi+xmin] = 0;
+		  // yuv[2][yi+xmin] = 0;
+		  yuv[0][yi+xmax-1] = 255;
+		  yuv[1][yi+xmax-1] = 0;
+		  yuv[2][yi+xmax-1] = 0;
+	  
+		}
+	  }
+	}
+/*
+        if(with_border){ // Draw base
+	        // y still set to bottom from above loop
+	        // Left triangle 1
+		xmin=x0-yr*xslope;
+		xmax=x0+yr*xslope;
+		if (xmin<0)
+		  xmin=0;
+		if (xmax>width)
+		  xmax=width;
+		for (x = xmin; x < xmax; x++) {
+		  yuv[0][yi+xmin] = 255;
+		  yuv[1][yi+xmin] = 255;
+		  yuv[2][yi+xmin] = 0;
+		}
+	}
+*/
+
+	// lateral reflections
+	if(x0-wt>0){ // Extra space left of initial reflections
+	  for (yr = 0; yr < ht; yr++) {
+	    y=y0+yr;
+	    if(y>=0 && y<height){
+	      yi = y * width;
+	      for (x=x0-wt-1; x>0;x--){ // Reverse scan so it can copy itself
+		// Main pattern is 3 * wt wide and starts at x0-wt
+	        yuv[0][yi+x] = yuv[0][yi+x+3*wt];
+	        yuv[1][yi+x] = yuv[1][yi+x+3*wt];
+	        yuv[2][yi+x] = yuv[2][yi+x+3*wt];
+	      }
+	    }
+	  }
+	}
+	if(x0+2*wt<width){ // Extra space right of initial reflections
+	  for (yr = 0; yr < ht; yr++) {
+	    y=y0+yr;
+	    if(y>=0 && y<height){
+	      yi = y * width;
+	      for (x=x0+2*wt; x<width;x++){ // Forward scan so it can copy itself
+		// Main pattern is 3 * wt wide and starts at x0-wt
+	        yuv[0][yi+x] = yuv[0][yi+x-3*wt];
+	        yuv[1][yi+x] = yuv[1][yi+x-3*wt];
+	        yuv[2][yi+x] = yuv[2][yi+x-3*wt];
+	      }
+	    }
+	  }
+	}
+	
+	// vertical reflections
+	if (y0>0) { // First reflections above original
+	  for (y=y0;y>y0-ht && y>0;y--){
+	    yi = y * width;
+	    yr = y - y0;
+	    yi2 = (y0-yr)* width; // Source 1 triangle height below, inverted
+	    for(x=0;x<width;x++){
+	      	yuv[0][yi+x] = yuv[0][yi2+x];
+	        yuv[1][yi+x] = yuv[1][yi2+x];
+	        yuv[2][yi+x] = yuv[2][yi2+x];
+
+	    }
+	  }
+	}
+	if (y0>ht) { // Extra space above initial reflections
+	  for (y=y0-ht;y>0;y--){
+	    yi = y * width;
+	    yi2 = yi + 2*ht* width;
+	    for(x=0;x<width;x++){
+	      	yuv[0][yi+x] = yuv[0][yi2+x];
+	        yuv[1][yi+x] = yuv[1][yi2+x];
+	        yuv[2][yi+x] = yuv[2][yi2+x];
+
+	    }
+	  }
+	}
+	
+	if (y2<height) { // First reflections below original
+	  for (y=y2;y<y2+ht && y<height;y++){
+	    yi = y * width;
+	    yr = y-y2; // will remain positive
+	    ys = y2-yr;
+	    yi2 = ys * width; // Source 1 triangle height above, inverted
+	    for(x=0;x<width;x++){
+	      	yuv[0][yi+x] = yuv[0][yi2+x];
+	        yuv[1][yi+x] = yuv[1][yi2+x];
+	        yuv[2][yi+x] = yuv[2][yi2+x];
+
+	    }
+	  }
+	}
+	if (y2+ht<height) { // Extra space below initial reflections
+	  for (y=y2+ht;y<height;y++){
+	    yi = y * width;
+	    yi2 = yi - 2*ht*width;
+	    for(x=0;x<width;x++){
+	      	yuv[0][yi+x] = yuv[0][yi2+x];
+	        yuv[1][yi+x] = yuv[1][yi2+x];
+	        yuv[2][yi+x] = yuv[2][yi2+x];
+
+	    }
+	  }
+	}
+
+///////////////////////////////////////////////////////////////////////////////	
+
+	// center triangle - draw borders
+	if (with_border){
+	  // center triangle - draw sides
+	  for (yr = 0; yr < ht; yr++) {
+	    if(y0+yr>=0 && y0+yr<height){
+		  yi = (y0+yr) * width;
+		  xmin=x0+yr*xslope;
+		  xmax=x0+wt-yr*xslope;
+		  if (xmin>=0 && xmin<width){
+		    yuv[0][yi+xmin] = 255;
+		    yuv[1][yi+xmin] = 255;
+		    yuv[2][yi+xmin] = 255;
+		  }
+		  if (xmax>0 && xmax<width){
+		    yuv[0][yi+xmax] = 255;
+		    yuv[1][yi+xmax] = 255;
+		    yuv[2][yi+xmax] = 255;
+		  }
+		  // Fill triangle
 		  // for (x = xmin; x < xmax; x++) {
 			  // yuv[0][yi+x] = 255;
-
-			  /* cb = yuv[1][yi + x];
-			  cr = yuv[2][yi + x]; */
-			  /* yuv[1][yi + x] = cb;
-			  yuv[2][yi + x] = cr; */
 			  
 		  // }
+	     }
 	  }
 	  // center triangle - draw base
-	  yi=y0*width;
-	  for(x=x0; x<x0+wt; x++){
-	    yuv[0][yi+x] = 255;
+          if(y0>=0 && y0<height){
+	    yi=y0*width;
+	    for(x=x0; x<x0+wt; x++){
+              if (x>=0 && x<width)
+	        yuv[0][yi+x] = 255;
+	        yuv[1][yi+x] = 255;
+	        yuv[2][yi+x] = 255;
+	    }
 	  }
 	}
-	// top triangle
-	unsigned int ymin=0;
-	if (y0>ht) ymin=y0-ht;
-	for (y = y0; y > ymin; y--) {
-	        yi=y * width;
-	        yr=y0-y;
-		yi2=(y0+yr) * width;
-                xmin=x0+yr*xpente;
-                xmax=x0+wt-yr*xpente;
-		for (x = xmin; x <= xmax; x++) {
-			yuv[0][yi+x] = yuv[0][yi2+x];
-			yuv[1][yi+x] = yuv[1][yi2+x];
-			yuv[2][yi+x] = yuv[2][yi2+x];
-		}
-	}
-	// bottom triangle
-	unsigned int ymax=y0+ht+ht;
-	if (ymax>height) ymax=height;
-	for (y = y0+ht; y < ymax; y++) {
-		yi=y * width;
-		yr=y-(y0+ht);
-		yi2=(y0+ht-yr) * width;
-		xmin=xc-yr*xpente;
-		xmax=xc+yr*xpente;
-		for (x = xmin; x <= xmax; x++) {
-			/* central symmetry
-			yuv[0][yi+x] = yuv[0][yi2+width-x];
-			yuv[1][yi+x] = yuv[1][yi2+width-x];
-			yuv[2][yi+x] = yuv[2][yi2+width-x];
-			*/
-			// Straight reflexion
-			yuv[0][yi+x] = yuv[0][yi2+x];
-			yuv[1][yi+x] = yuv[1][yi2+x];
-			yuv[2][yi+x] = yuv[2][yi2+x];
-		}    
-	}
-	// left triangle 1
-	
-	for (yr = 0; yr < ht; yr++) {
-		yi = (y0+yr) * width;
-		xmin=x0-wt-yr*xpente;
-		if (xmin<0)
-			xmin=0;
-		xmax=x0+yr*xpente;
-		if(with_border){
-		  // Draw sides
-		  yuv[0][yi+xmin] = 255;
-		  yuv[0][yi+xmax] = 255;
-		  yuv[1][yi+xmin] = 255;
-		  yuv[1][yi+xmax] = 255;
-		}
-		for (x = xmin; x < xmax; x++) {
-			int xr, x2, y2, xr2, yr2, yi2;
-			xr = x-x0;
-			xr2=xr*cos2a+yr*sin2a;
-			yr2=xr*sin2a-yr*cos2a;
-			x2=xr2+x0;
-			y2=yr2+y0;
-			yi2=y2*width;
-			
-			yuv[0][yi+x] = yuv[0][yi2+x2];
-			yuv[1][yi+x] = yuv[1][yi2+x2];
-			yuv[2][yi+x] = yuv[2][yi2+x2];
-			
-		}
-	}
-	// left triangle 2
-	for (yr = 0; yr < ht; yr++) {
-		yi = (y0+yr) * width;
-		xmin=x0-wt+yr*xpente;
-		if (xmin<0)
-			xmin=0;
-		xmax=x0-yr*xpente;
-		if(with_border){
-		  // Draw sides
-		  yuv[0][yi+xmin] = 255;
-		  yuv[0][yi+xmax] = 255;
-		  yuv[1][yi+xmin] = 255;
-		  yuv[1][yi+xmax] = 255;
-		}
-		for (x = xmin; x < xmax; x++) {
-			int xr, x2, y2, xr2, yr2, yi2;
-			xr = x-x0;
-			xr2=xr*cos2a+yr*sin2a;
-			yr2=xr*sin2a-yr*cos2a;
-			x2=xr2+x0;
-			y2=yr2+y0;
-			yi2=y2*width;
-			
-			yuv[0][yi+x] = yuv[0][yi2+x2];
-			yuv[1][yi+x] = yuv[1][yi2+x2];
-			yuv[2][yi+x] = yuv[2][yi2+x2];
-			
-		}
-	}
-	// right triangle 1
-	for (yr = 0; yr < ht; yr++) {
-		yi = (y0+yr) * width;
-                xmin=x0+wt-yr*xpente;
-                xmax=x0+wt+yr*xpente;
-		if (xmax>width) xmax=width;
-		if(with_border){
-		  // Draw sides
-		  yuv[0][yi+xmin] = 255;
-		  yuv[0][yi+xmax] = 255;
-		  yuv[1][yi+xmin] = 255;
-		  yuv[1][yi+xmax] = 255;
-		}
-		for (x = xmin; x < xmax; x++) {
-		        int xr, x2, y2, xr2, yr2, yi2;
-			xr = x-x0-wt;
-			xr2=xr*cos2a-yr*sin2a;
-			yr2=-xr*sin2a-yr*cos2a;
-			x2=xr2+x0+wt;
-			y2=yr2+y0;
-			yi2=y2*width;
-			
-			yuv[0][yi+x] = yuv[0][yi2+x2];
-			yuv[1][yi+x] = yuv[1][yi2+x2];
-			yuv[2][yi+x] = yuv[2][yi2+x2];
-			
-		}
-	}
-	// right triangle 2
-	for (yr = 0; yr < ht; yr++) {
-		yi = (y0+yr) * width;
-                xmin=x0+wt+yr*xpente;
-                xmax=x0+wt+wt-yr*xpente;
-		if (xmax>width) xmax=width;
-		if(with_border){
-		  // Draw sides
-		  yuv[0][yi+xmin] = 255;
-		  yuv[0][yi+xmax] = 255;
-		  yuv[1][yi+xmin] = 255;
-		  yuv[1][yi+xmax] = 255;
-		}
-		for (x = xmin; x < xmax; x++) {
-		        int xr, x2, y2, xr2, yr2, yi2;
-			xr = x-x0-wt;
-			xr2=xr*cos2a-yr*sin2a;
-			yr2=-xr*sin2a-yr*cos2a;
-			x2=xr2+x0+wt;
-			y2=yr2+y0;
-			yi2=y2*width;
-			
-			yuv[0][yi+x] = yuv[0][yi2+x2];
-			yuv[1][yi+x] = yuv[1][yi2+x2];
-			yuv[2][yi+x] = yuv[2][yi2+x2];
-			
-		}
-	}
-
 }
 
 void kaleidoscope_apply( VJFrame *frame, int border, int size)
