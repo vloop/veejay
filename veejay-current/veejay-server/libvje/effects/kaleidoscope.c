@@ -22,45 +22,15 @@
 #include <libvjmem/vjmem.h>
 #include "kaleidoscope.h"
 
-static int frame_index = 0; // TODO refactor malloc/prepare
-
-vj_effect *kaleidoscope_init(int w, int h)
-{
-
-	vj_effect *ve = (vj_effect *) vj_calloc(sizeof(vj_effect));
-	ve->num_params = 2;
-	ve->defaults = (int *) vj_calloc(sizeof(int) * ve->num_params);	/* default values */
-	ve->limits[0] = (int *) vj_calloc(sizeof(int) * ve->num_params);	/* min */
-	ve->limits[1] = (int *) vj_calloc(sizeof(int) * ve->num_params);	/* max */
-	ve->defaults[0] = 0;
-	ve->defaults[1] = w/2;
-	ve->limits[0][0] = 0;	/* no border or border*/
-	ve->limits[1][0] = 1;
-	ve->limits[0][1] = 0;	/* triangle size */
-	ve->limits[1][1] = w; // TODO fix max size to w*2
-
-	ve->sub_format = 1;
-	ve->description = "Kaleidoscope !";
-	ve->extra_frame = 0;
-	ve->has_user = 0;
-	ve->param_description = vje_build_param_list(ve->num_params, "Border", "Triangle size");
-	return ve;
-}
-
-static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const int wt)
-{
-	uint8_t ** yuv = frame->data;
-	int width = frame->width;
-	int height = frame->height;
-	double timecode = frame->timecode;
 ///////////////////////////////////////////////////////////////////////////////
 	
   /////////////////////////////////////////////////////////////
   // debugging functions to display digits - should be moved //
   /////////////////////////////////////////////////////////////
-	int setsegments (const int segments, const int x0, const int y0, const int seglen, const int Y, const int Cb, const int Cr){
+	int setsegments (uint8_t ** yuv, int width, int height, const int segments, const int x0, const int y0, const int seglen, const int Y, const int Cb, const int Cr, const float slope, const int bold){
+	  // display binary-coded digit, 1 bit per segment
 	  // 0..5 (abcdef) clockwise from top, 6 (g) dash, 7 dot
-	  // if (segnum>7) return(1);
+	  // TODO: slope, bold, xy bound checking  
 	  unsigned int x, y, yi;
 	    if(segments & 1) { // a: horizontal, top
 	      yi=(y0-2*seglen)*width;
@@ -132,18 +102,18 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 	    return(0);
 	}
 	
-	int showdigit (const int digit, const int x0, const int y0, const int seglen, const int Y, const int Cb, const int Cr){
+	int showdigit (uint8_t ** yuv, int width, int height, const int digit, const int x0, const int y0, const int seglen, const int Y, const int Cb, const int Cr){
 	  int gfedcba[16] = { 0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F, 0x77, 0x7C, 0x39, 0x5E, 0x79, 0x71 };
-	  setsegments(gfedcba[digit & 0x0F], x0, y0, seglen, Y, Cb, Cr);
+	  setsegments(yuv, width, height, gfedcba[digit & 0x0F], x0, y0, seglen, Y, Cb, Cr, 0.0, 0);
           return(0);
 	}
 	// showdigit(3, x0, y0, 10, 255, 0, 0);
 
-	int showhexdigits (const int digits, const int x0, const int y0, const int seglen, const int Y, const int Cb, const int Cr){
-	  showdigit(digits & 0x0F, x0+(seglen+5)*3, y0, seglen, Y, Cb, Cr);
-	  showdigit((digits >> 4) & 0x0F, x0+(seglen+5)*2, y0, seglen, Y, Cb, Cr);
-	  showdigit((digits >> 8) & 0x0F, x0+(seglen+5), y0, seglen, Y, Cb, Cr);
-	  showdigit((digits >> 12) & 0x0F, x0, y0, seglen, Y, Cb, Cr);
+	int showhexdigits (uint8_t ** yuv, int width, int height, const int digits, const int x0, const int y0, const int seglen, const int Y, const int Cb, const int Cr){
+	  showdigit(yuv, width, height, digits & 0x0F, x0+(seglen+5)*3, y0, seglen, Y, Cb, Cr);
+	  showdigit(yuv, width, height, (digits >> 4) & 0x0F, x0+(seglen+5)*2, y0, seglen, Y, Cb, Cr);
+	  showdigit(yuv, width, height, (digits >> 8) & 0x0F, x0+(seglen+5), y0, seglen, Y, Cb, Cr);
+	  showdigit(yuv, width, height, (digits >> 12) & 0x0F, x0, y0, seglen, Y, Cb, Cr);
 	  return(0);
 	}
 	// const unsigned int seglen=12;
@@ -154,6 +124,38 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 	// showhexdigits(0xCDEF, xc, yc-9*seglen, seglen, 255, 0, 0);
 
 ///////////////////////////////////////////////////////////////////////////////
+
+static int frame_index = 0; // TODO refactor malloc/prepare
+
+vj_effect *kaleidoscope_init(int w, int h)
+{
+
+	vj_effect *ve = (vj_effect *) vj_calloc(sizeof(vj_effect));
+	ve->num_params = 2;
+	ve->defaults = (int *) vj_calloc(sizeof(int) * ve->num_params);	/* default values */
+	ve->limits[0] = (int *) vj_calloc(sizeof(int) * ve->num_params);	/* min */
+	ve->limits[1] = (int *) vj_calloc(sizeof(int) * ve->num_params);	/* max */
+	ve->defaults[0] = 0;
+	ve->defaults[1] = w/2;
+	ve->limits[0][0] = 0;	/* no border or border*/
+	ve->limits[1][0] = 10;
+	ve->limits[0][1] = 0;	/* triangle size */
+	ve->limits[1][1] = w; // TODO fix max size to w*2
+
+	ve->sub_format = 1;
+	ve->description = "Kaleidoscope !";
+	ve->extra_frame = 0;
+	ve->has_user = 0;
+	ve->param_description = vje_build_param_list(ve->num_params, "Border", "Triangle size");
+	return ve;
+}
+
+static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const int wt)
+{
+	uint8_t ** yuv = frame->data;
+	int width = frame->width;
+	int height = frame->height;
+	double timecode = frame->timecode;
 
 	const float sin60 = sin(M_PI/3);
 	// const float cos60 = cos(M_PI/3);
@@ -174,10 +176,10 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 	const int y0=yc-ht/2;
 	const int x0=xc-wt/2;
 	// x1, y1 top right angle of the source triangle
-	const int y1=yc-ht/2;
-	const int x1=xc+wt/2;
+	const int y1=y0;
+	const int x1=x0+wt;
 	// x2, y2 bottom angle of the source triangle
-	const int y2=yc+ht/2;
+	const int y2=y0+ht;
 	const int x2=xc;
 
 	// general work variables
@@ -191,24 +193,67 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 	const unsigned int seglen=12, lineheigth=3*seglen;
 	x=xc-3*seglen;
 	y=yc+lineheigth;
-	showhexdigits(wt, x, y, seglen, 255, 0, 0);
-	showhexdigits(wt, x+1, y+1, seglen, 255, 0, 0);
+	showhexdigits(yuv, width, height, wt, x, y, seglen, 255, 0, 0);
+	showhexdigits(yuv, width, height, wt, x+1, y+1, seglen, 255, 0, 0);
 	y-=lineheigth;
-	showhexdigits(y0, x, y, seglen, 255, 255, 0);
-	showhexdigits(y0, x+1, y+1, seglen, 255, 255, 0);
+	showhexdigits(yuv, width, height, y0, x, y, seglen, 255, 255, 0);
+	showhexdigits(yuv, width, height, y0, x+1, y+1, seglen, 255, 255, 0);
 	y-=lineheigth;
-	showhexdigits(frame_index, x, y, seglen, 0, 255, 255);
-	showhexdigits(frame_index, x+1, y+1, seglen, 0, 255, 255);
+	showhexdigits(yuv, width, height, frame_index, x, y, seglen, 0, 255, 255);
+	showhexdigits(yuv, width, height, frame_index, x+1, y+1, seglen, 0, 255, 255);
 	y-=lineheigth;
-	showhexdigits((int)timecode, x, y, seglen, 0, 0, 255);
-	showhexdigits((int)timecode, x+1, y+1, seglen, 0, 0, 255);
+	showhexdigits(yuv, width, height, (int)timecode, x, y, seglen, 0, 0, 255);
+	showhexdigits(yuv, width, height, (int)timecode, x+1, y+1, seglen, 0, 0, 255);
+
+	// draw original triangle borders
+	if (with_border){
+	  // original triangle - draw sides
+	  for (yr = 0; yr <= ht; yr++) {
+	    if(y0+yr>=0 && y0+yr<height){
+		  yi = (y0+yr) * width;
+		  xmin=x0+yr*xslope;
+		  xmax=x1-yr*xslope;
+		  for(xr=0; xr<=with_border; xr++){
+		    if (xmin+xr>=0 && xmin+xr<width){
+		      yuv[0][yi+xmin+xr] = 255;
+		      yuv[1][yi+xmin+xr] = 255;
+		      yuv[2][yi+xmin+xr] = 255;
+		    }
+		    if (xmax-xr>=0 && xmax-xr<width){
+		      yuv[0][yi+xmax-xr] = 255;
+		      yuv[1][yi+xmax-xr] = 255;
+		      yuv[2][yi+xmax-xr] = 255;
+		    }
+		  }
+		  // Fill triangle
+		  // for (x = xmin; x < xmax; x++) {
+			  // yuv[0][yi+x] = 255;
+			  
+		  // }
+	     }
+	  }
+	  // original triangle - draw base (at top)
+	  for (y=y0; y<y0+with_border; y++){
+	    if(y>=0 && y<height){
+	      yi=y*width;
+	      for(x=x0; x<x1; x++){
+		if (x>=0 && x<width)
+		  yuv[0][yi+x] = 255;
+		  yuv[1][yi+x] = 255;
+		  yuv[2][yi+x] = 255;
+	      }
+	    }
+	  }
+	}
 
 	// reflection work variables (s for source)
 	int xs, ys, xrs, yrs, xr2, yr2;
 
-	// First horizontal reflections
+	//////////////////////////////////
+	// First horizontal reflections //
+	//////////////////////////////////
 	// what if source triangle is out of bounds? can a read cause a core dump?
-	for (yr = 0; yr < ht; yr++) {
+	for (yr = 0; yr <= ht; yr++) {
 	  y=y0+yr;
 	  if(y>=0 && y<height){
 		yi = y * width;
@@ -221,7 +266,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 		if (xmax<0)
 		  xmax=0;
 		// if (xmax>width) xmax=width; // should not happen on left reflections
-		for (x = xmin; x < xmax; x++) {
+		for (x = xmin; x <= xmax; x++) {
 			xr = x - x0;
 			xrs = xr*cos2a + yr*sin2a;
 			yrs = xr*sin2a - yr*cos2a;
@@ -237,20 +282,9 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 			  yuv[1][yi+x] = 0;
 			  yuv[2][yi+x] = 0;
 			}
-			
 		}
-		if(with_border){
-		  // Draw sides
-		  yuv[0][yi+xmin] = 255;
-		  yuv[1][yi+xmin] = 255;
-		  yuv[2][yi+xmin] = 0;
-		  yuv[0][yi+xmax-1] = 255;
-		  yuv[1][yi+xmax-1] = 255;
-		  yuv[2][yi+xmax-1] = 0;
-	  
-		}
-		
-	        // left triangle 2
+
+		// left triangle 2
 	        // left triangle 1 reflection = source triangle rotation !!
 	        // TODO skip completely if off-screen
 		xmin=x0-wt+yr*xslope;
@@ -259,22 +293,10 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 		  xmin=0;
 		if (xmax<0)
 		  xmax=0;
-		if (xmin>width) xmin=width;
-		// if (xmax>width) xmax=width; // should not happen on left reflections
-		for (x = xmin; x < xmax; x++) {
+		if (xmin>=width) xmin=width-1;
+		if (xmax>=width) xmax=width-1; // should not happen on left reflections
+		for (x = xmin; x <= xmax; x++) {
 			xr = x-x0; // <0 for left triangle 2
-			// 180° reflection?
-			// xrs = xr*cos4a - yr*sin4a;
-			// yrs = -xr*sin4a - yr*cos4a;
-			// -120° reflection?
-			// xrs = xr*cos2a - yr*sin2a;
-			// yrs = -xr*sin2a - yr*cos2a;
-			// 180° reflection? ok if top triangle set?
-			// xrs = xr*cos2a + yr*sin2a;
-			// yrs = xr*sin2a - yr*cos2a;
-			// ??
-			// xrs = xr*cos4a + yr*sin4a;
-			// yrs = xr*sin4a - yr*cos4a;
 			// rotation -2a
 			xrs = xr*cos2a + yr*sin2a;
 			yrs = -xr*sin2a + yr*cos2a;
@@ -297,24 +319,15 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 			  yuv[2][yi+x] = 255;
 			}
 		}
-		if(with_border){
-		  // Draw sides
-		  yuv[0][yi+xmin] = 255;
-		  yuv[1][yi+xmin] = 0;
-		  yuv[2][yi+xmin] = 0;
-		  yuv[0][yi+xmax-1] = 255;
-		  yuv[1][yi+xmax-1] = 0;
-		  yuv[2][yi+xmax-1] = 0;
-	  
-		}
-
+		
 		// right triangle 1
 		xmin=x1-yr*xslope;
 		xmax=x1+yr*xslope;
-		// if (xmin<0) xmin=0; // should not happen on right reflections
-		if (xmin>width) xmin=width;
-		if (xmax>width) xmax=width;
-		for (x = xmin; x < xmax; x++) {
+		if (xmin<0) xmin=0; // should not happen on right reflections
+		if (xmax<0) xmax=0;
+		if (xmin>=width) xmin=width-1;
+		if (xmax>=width) xmax=width-1;
+		for (x = xmin; x <= xmax; x++) {
 			xr = x - x1;
 			// yr already set correctly
 			xrs = xr*cos2a - yr*sin2a;
@@ -333,26 +346,18 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 			}
 			
 		}
-		if(with_border){
-		  // Draw sides
-		  yuv[0][yi+xmin] = 255;
-		  yuv[1][yi+xmin] = 255;
-		  yuv[2][yi+xmin] = 0;
-		  yuv[0][yi+xmax-1] = 255;
-		  yuv[1][yi+xmax-1] = 255;
-		  yuv[2][yi+xmax-1] = 0;
-	  
-		}
 		
 	        // right triangle 2
 	        // right triangle 1 reflection = source triangle rotation !!
 	        // TODO skip completely if off-screen
-		xmin=x0+wt+yr*xslope;
-		xmax=x0+wt+wt-yr*xslope;
-		if (xmax>width) xmax=width;
-		if (xmin>width) xmin=width;
+		xmin=x1+yr*xslope;
+		xmax=x1+wt-yr*xslope;
+		if (xmin<0) xmin=0; // should not happen on right reflections
+		if (xmax<0) xmax=0;
+		if (xmax>=width) xmax=width-1;
+		if (xmin>=width) xmin=width-1;
 		// if (xmax>width) xmax=width; // should not happen on left reflections
-		for (x = xmin; x < xmax; x++) {
+		for (x = xmin; x <= xmax; x++) {
 			xr = x-x1; // <0 for left triangle 2
 			// rotation +2a
 			xrs = xr*cos2a - yr*sin2a;
@@ -376,16 +381,6 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 			  yuv[2][yi+x] = 255;
 			}
 		}
-		if(with_border){
-		  // Draw sides
-		  yuv[0][yi+xmin] = 255;
-		  yuv[1][yi+xmin] = 0;
-		  yuv[2][yi+xmin] = 0;
-		  yuv[0][yi+xmax-1] = 255;
-		  yuv[1][yi+xmax-1] = 0;
-		  yuv[2][yi+xmax-1] = 0;
-	  
-		}
 	  }
 	}
 
@@ -402,10 +397,12 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 	        // TODO skip completely if off-screen
 		xmin=x1+wt-yr*xslope; // From top
 		xmax=x1+wt ; // +yr*xslope; // comment out slope for left half only
-		if (xmax>width) xmax=width;
-		if (xmin>width) xmin=width;
+		if (xmin<0) xmin=0; // should not happen on right reflections
+		if (xmax<0) xmax=0;
+		if (xmax>=width) xmax=width-1;
+		if (xmin>=width) xmin=width-1;
 		// if (xmax>width) xmax=width; // should not happen on left reflections
-		for (x = xmin; x < xmax; x++) {
+		for (x = xmin; x <= xmax; x++) {
 			xr2 = x-(x2+wt);
 			// rotation -2a
 			xrs = xr2*cos2a + yr2*sin2a;
@@ -429,16 +426,6 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 			  yuv[2][yi+x] = 255;
 			}
 		}
-		if(with_border){
-		  // Draw sides
-		  yuv[0][yi+xmin] = 255;
-		  yuv[1][yi+xmin] = 0;
-		  yuv[2][yi+xmin] = 0;
-		  // yuv[0][yi+xmax-1] = 255;
-		  // yuv[1][yi+xmax-1] = 0;
-		  // yuv[2][yi+xmax-1] = 0;
-	  
-		}
 		
 		// left triangle 3
 	        // left triangle 2 reflection = left triangle 2 rotation !!
@@ -449,9 +436,9 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 		  xmin=0;
 		if (xmax<0)
 		  xmax=0;
-		// if (xmin>width) xmin=width;
-		// if (xmax>width) xmax=width; // should not happen on left reflections
-		for (x = xmin; x < xmax; x++) {
+		if (xmax>=width) xmax=width-1;
+		if (xmin>=width) xmin=width-1;
+		for (x = xmin; x <= xmax; x++) {
 			xr2 = x-(x2-wt); // <0 for left triangle 3
 			// rotation -2a
 			xrs = xr2*cos2a - yr2*sin2a;
@@ -474,38 +461,13 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 			  yuv[1][yi+x] = 0;
 			  yuv[2][yi+x] = 255;
 			}
-		}
-		if(with_border){
-		  // Draw sides
-		  // yuv[0][yi+xmin] = 255;
-		  // yuv[1][yi+xmin] = 0;
-		  // yuv[2][yi+xmin] = 0;
-		  yuv[0][yi+xmax-1] = 255;
-		  yuv[1][yi+xmax-1] = 0;
-		  yuv[2][yi+xmax-1] = 0;
-	  
-		}
+		}    
 	  }
 	}
-/*
-        if(with_border){ // Draw base
-	        // y still set to bottom from above loop
-	        // Left triangle 1
-		xmin=x0-yr*xslope;
-		xmax=x0+yr*xslope;
-		if (xmin<0)
-		  xmin=0;
-		if (xmax>width)
-		  xmax=width;
-		for (x = xmin; x < xmax; x++) {
-		  yuv[0][yi+xmin] = 255;
-		  yuv[1][yi+xmin] = 255;
-		  yuv[2][yi+xmin] = 0;
-		}
-	}
-*/
 
-	// lateral reflections
+	/////////////////////////
+	// lateral reflections //
+	/////////////////////////
 	if(x0-wt>0){ // Extra space left of initial reflections
 	  for (yr = 0; yr < ht; yr++) {
 	    y=y0+yr;
@@ -535,7 +497,9 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 	  }
 	}
 	
-	// vertical reflections
+	//////////////////////////
+	// vertical reflections //
+	//////////////////////////
 	if (y0>0) { // First reflections above original
 	  for (y=y0;y>y0-ht && y>0;y--){
 	    yi = y * width;
@@ -589,44 +553,6 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_border, const 
 	  }
 	}
 
-///////////////////////////////////////////////////////////////////////////////	
-
-	// center triangle - draw borders
-	if (with_border){
-	  // center triangle - draw sides
-	  for (yr = 0; yr < ht; yr++) {
-	    if(y0+yr>=0 && y0+yr<height){
-		  yi = (y0+yr) * width;
-		  xmin=x0+yr*xslope;
-		  xmax=x0+wt-yr*xslope;
-		  if (xmin>=0 && xmin<width){
-		    yuv[0][yi+xmin] = 255;
-		    yuv[1][yi+xmin] = 255;
-		    yuv[2][yi+xmin] = 255;
-		  }
-		  if (xmax>0 && xmax<width){
-		    yuv[0][yi+xmax] = 255;
-		    yuv[1][yi+xmax] = 255;
-		    yuv[2][yi+xmax] = 255;
-		  }
-		  // Fill triangle
-		  // for (x = xmin; x < xmax; x++) {
-			  // yuv[0][yi+x] = 255;
-			  
-		  // }
-	     }
-	  }
-	  // center triangle - draw base
-          if(y0>=0 && y0<height){
-	    yi=y0*width;
-	    for(x=x0; x<x0+wt; x++){
-              if (x>=0 && x<width)
-	        yuv[0][yi+x] = 255;
-	        yuv[1][yi+x] = 255;
-	        yuv[2][yi+x] = 255;
-	    }
-	  }
-	}
 }
 
 void kaleidoscope_apply( VJFrame *frame, int border, int size)
