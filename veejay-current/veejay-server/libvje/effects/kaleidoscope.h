@@ -21,6 +21,7 @@
 #ifndef KALEIDOSCOPE_H
 #define KALEIDOSCOPE_H
 vj_effect *kaleidoscope_init();
-void kaleidoscope_apply( VJFrame *frame, int border, int size);
+void kaleidoscope_apply( VJFrame *frame, int with_triangles, int wt, int border, int light_pct);
 void kaleidoscope_free();
 #endif
+
