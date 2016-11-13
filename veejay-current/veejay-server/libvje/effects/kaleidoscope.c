@@ -146,8 +146,8 @@ vj_effect *kaleidoscope_init(int w, int h)
 	ve->limits[1][0] = 1;
 	ve->limits[0][1] = 0; // triangle or rectangle width
 	ve->limits[1][1] = w; // TODO fix max size to w*2
-	ve->limits[0][2] = 0; // Border size
-	ve->limits[1][2] = w/2;
+	ve->limits[0][2] = 0; // Border size pct
+	ve->limits[1][2] = 100;
 	ve->limits[0][3] = 0;
 	ve->limits[1][3] = 255; // red
 	ve->limits[0][4] = 0;
@@ -165,7 +165,7 @@ vj_effect *kaleidoscope_init(int w, int h)
 	return ve;
 }
 
-static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, const int wt, const unsigned int border_size, int border_r, int border_g, int border_b, const int light_pct)
+static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, const int wt, const unsigned int border_size_pct, int border_r, int border_g, int border_b, const int light_pct)
 {
   // Probably a few off by one and rounding errors left
   // Square kaleidoscope is not geometrically correct, some reflections should be simultaneously straight and inverted
@@ -209,30 +209,15 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
 	// uint8_t cb, cr;
 	uint8_t border_y,border_u,border_v;
 	_rgb2yuv( border_r,border_g,border_b,border_y,border_u,border_v );
+	int border_size;
 
-	// Debugging display
-	int debugging=0;
-	if(debugging){
-	  const unsigned int seglen=12, lineheigth=3*seglen;
-	  x=xc-3*seglen;
-	  y=yc+lineheigth;
-	  showhexdigits(yuv, width, height, wt, x, y, seglen, 255, 0, 0);
-	  showhexdigits(yuv, width, height, wt, x+1, y+1, seglen, 255, 0, 0);
-	  y-=lineheigth;
-	  showhexdigits(yuv, width, height, y0, x, y, seglen, 255, 255, 0);
-	  showhexdigits(yuv, width, height, y0, x+1, y+1, seglen, 255, 255, 0);
-	  y-=lineheigth;
-	  showhexdigits(yuv, width, height, frame_index, x, y, seglen, 0, 255, 255);
-	  showhexdigits(yuv, width, height, frame_index, x+1, y+1, seglen, 0, 255, 255);
-	  y-=lineheigth;
-	  showhexdigits(yuv, width, height, (int)timecode, x, y, seglen, 0, 0, 255);
-	  showhexdigits(yuv, width, height, (int)timecode, x+1, y+1, seglen, 0, 0, 255);
-	}
 
 	// draw original triangle borders
-	if (border_size){
+	if (border_size_pct){
+	  border_size=wt*border_size_pct/200;
 	  if(with_triangles){
 	    // original triangle - draw sides
+	    // todo - don't go past opposite border
 	    for (yr = 0; yr <= ht; yr++) {
 	      if(y0+yr>=0 && y0+yr<height){
 		    yi = (y0+yr) * width;
@@ -257,11 +242,11 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
 		    // }
 	      }
 	    }
-	    // original triangle - draw base (at top)
+	    // original triangle - draw trapezoidal base (at top)
 	    for (y=y0; y<y0+border_size; y++){
 	      if(y>=0 && y<height){
 		yi=y*width;
-		for(x=x0; x<x1; x++){
+		for(x=x0+(y-y0)*xslope; x<=x1+(y-y0)*xslope; x++){
 		  if (x>=0 && x<width)
 		    yuv[0][yi+x] = border_y;
 		    yuv[1][yi+x] = border_u;
@@ -307,6 +292,26 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
 	     }
 	  }
 	}
+	
+	// Debugging display
+	int debugging=0;
+	if(debugging){
+	  const unsigned int seglen=12, lineheigth=3*seglen;
+	  x=xc-3*seglen;
+	  y=yc+lineheigth;
+	  showhexdigits(yuv, width, height, border_size/xslope, x, y, seglen, 255, 0, 0);
+	  showhexdigits(yuv, width, height, border_size/xslope, x+1, y+1, seglen, 255, 0, 0);
+	  y-=lineheigth;
+	  showhexdigits(yuv, width, height, border_size, x, y, seglen, 255, 255, 0);
+	  showhexdigits(yuv, width, height, border_size, x+1, y+1, seglen, 255, 255, 0);
+	  y-=lineheigth;
+	  showhexdigits(yuv, width, height, frame_index, x, y, seglen, 0, 255, 255);
+	  showhexdigits(yuv, width, height, frame_index, x+1, y+1, seglen, 0, 255, 255);
+	  y-=lineheigth;
+	  showhexdigits(yuv, width, height, (int)timecode, x, y, seglen, 0, 0, 255);
+	  showhexdigits(yuv, width, height, (int)timecode, x+1, y+1, seglen, 0, 0, 255);
+	}
+
 
 	// reflection work variables (s for source)
 	int xs, ys, xrs, yrs, xr2, yr2;
