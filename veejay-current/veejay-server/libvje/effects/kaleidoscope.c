@@ -174,7 +174,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
 	int height = frame->height;
 	double timecode = frame->timecode;
 
-	const float sin60 = sin(M_PI/3);
+	const float sina = sin(M_PI/3); // about .866
 	// const float cos60 = cos(M_PI/3);
 	// const float tan30 = tan(M_PI/6);
 	const float sin2a = sin(2*M_PI/3);
@@ -188,9 +188,9 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
 	const int yc = height/2;
 	const int xc = width/2;
 	// Height of the triangle
-	const int ht = wt*sin60;
+	const int ht = wt*sina;
 	// x changes by half the triangle width while y moves across the triangle height
-	const float xslope=0.5*wt/ht;
+	const float xslope=0.5*wt/ht; // about .577
 	// x0, y0 top left angle of the source triangle
 	const int y0=yc-ht/2;
 	const int x0=xc-wt/2;
@@ -209,21 +209,22 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
 	// uint8_t cb, cr;
 	uint8_t border_y,border_u,border_v;
 	_rgb2yuv( border_r,border_g,border_b,border_y,border_u,border_v );
-	int border_size;
+	int border_size, top_size;
 
 
 	// draw original triangle borders
 	if (border_size_pct){
-	  border_size=wt*border_size_pct/200;
+	  border_size=wt*border_size_pct/300;
+	  top_size=2*ht*border_size/(wt*sina);
 	  if(with_triangles){
 	    // original triangle - draw sides
 	    // todo - don't go past opposite border
-	    for (yr = 0; yr <= ht; yr++) {
+	    for (yr = border_size; yr <= ht-top_size; yr++) {
 	      if(y0+yr>=0 && y0+yr<height){
 		    yi = (y0+yr) * width;
 		    xmin=x0+yr*xslope;
 		    xmax=x1-yr*xslope;
-		    for(xr=0; xr<=border_size/xslope; xr++){
+		    for(xr=0; xr<=border_size/sina; xr++){
 		      if (xmin+xr>=0 && xmin+xr<width){
 			yuv[0][yi+xmin+xr] = border_y;
 			yuv[1][yi+xmin+xr] = border_u;
@@ -246,7 +247,20 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
 	    for (y=y0; y<y0+border_size; y++){
 	      if(y>=0 && y<height){
 		yi=y*width;
-		for(x=x0+(y-y0)*xslope; x<=x1+(y-y0)*xslope; x++){
+		for(x=x0+(y-y0)*xslope; x<=x1-(y-y0)*xslope; x++){
+		  if (x>=0 && x<width)
+		    yuv[0][yi+x] = border_y;
+		    yuv[1][yi+x] = border_u;
+		    yuv[2][yi+x] = border_v;
+		}
+	      }
+	    }
+	    // original triangle - draw triangular summit (at bottom)
+	    for (yr=0; yr<=top_size; yr++){
+	      y=y2-yr;
+	      if(y>=0 && y<height){
+		yi=y*width;
+		for(x=x2-yr*xslope; x<=x2+yr*xslope; x++){
 		  if (x>=0 && x<width)
 		    yuv[0][yi+x] = border_y;
 		    yuv[1][yi+x] = border_u;
@@ -255,6 +269,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
 	      }
 	    }
 	  }else{ // Original rectangle borders
+	     border_size=wt*border_size_pct/200;
 	     for(y=y0;y<y2;y++){ // Vertical sides
 	       if(y>=0 && y<height){
 		    yi=y*width;
@@ -310,6 +325,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
 	  y-=lineheigth;
 	  showhexdigits(yuv, width, height, (int)timecode, x, y, seglen, 0, 0, 255);
 	  showhexdigits(yuv, width, height, (int)timecode, x+1, y+1, seglen, 0, 0, 255);
+	  return(0);
 	}
 
 
