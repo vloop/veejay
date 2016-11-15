@@ -24,13 +24,103 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
+////////////////////////////////////
+// Utilities - possibly redundant //
+////////////////////////////////////
+int fill_rectangle(uint8_t ** yuv, const unsigned int width, const unsigned int height, const int x0, const int y0, const int x1, const int y1, const uint8_t y, const uint8_t u, const uint8_t v){
+  int yi;
+  int x, xmin, xmax, ys, ymin, ymax;
+  
+  xmin=x0;
+  xmax=x1;
+  if (xmin>xmax){
+    xmin=x1;
+    xmax=x0;
+  }
+  if (xmin<0) xmin=0;
+  if (xmin>=width) return(-1); // Off-screen
+  if (xmax<0) return(-1); // Off-screen
+  if (xmax>=width) xmax=width-1;
+  
+  ymin=y0;
+  ymax=y1;
+  if (ymin>ymax){
+    ymin=y1;
+    ymax=y0;
+  }
+  if (ymin<0) ymin=0;
+  if (ymin>=height) return(-1); // Off-screen
+  if (ymax<0) return(-1); // Off-screen
+  if (ymax>=height) ymax=height-1;
+  
+  yi=ymin * width;
+  for (ys=ymin; ys<=ymax; ys++, yi+=width){
+    for(x=xmin; x<=xmax; x++){
+      yuv[0][yi+x] = y;
+      yuv[1][yi+x] = u;
+      yuv[2][yi+x] = v;
+    }
+  }
+  return(0); // Done
+}
+
+int fill_hparall (uint8_t ** yuv, const unsigned int width, const unsigned int height, const int x0, const int y0, const int x1, const int y1, const int xsize, const uint8_t y, const uint8_t u, const uint8_t v){
+  int yi;
+  int x, xtop, xmin, xbot, xmax, yr, ymin, ymax;
+  float xslope;
+  // x0, y0 should be top left and x1, y1 bottom left
+  // This function handles truncate to display
+  // TODO vertical slope is rectangle
+  if(x0==x1 || y0==y1) return(-2);
+  xtop=x0;
+  xbot=x1;
+  xmin=x0;
+  xmax=x1;
+  if (xmin>xmax){
+    xmin=x1;
+    xmax=x0;
+  }
+  // if (xmin>=width) return(-1); // Completely off-screen
+  // if (xmax<0) return(-1); // Completely off-screen
+  
+  ymin=y0;
+  ymax=y1;
+  if (ymin>ymax){
+    ymin=y1; xtop=x1;
+    ymax=y0; xbot=x0;
+  }
+  xslope=(float)(xbot-xtop)/(ymax-ymin);// Compute slope before truncate !!
+
+  if (ymin<0) ymin=0; // Truncate left - TODO should fix x
+  if (ymin>=height) return(-1); // Completely off-screen
+  if (ymax<0) return(-1); // Completely off-screen
+  if (ymax>=height) ymax=height-1; // Truncate right - TODO should fix x
+  
+  yi=ymin * width;
+  for (yr=0; yr<=ymax-ymin; yr++, yi+=width){
+    xmin=xtop+yr*xslope;
+    xmax=xmin+xsize;
+    if (xmin<0) xmin=0;
+    if (xmin>=width) continue; // Row off-screen
+    if (xmax<0) continue; // Row off-screen
+    if (xmax>=width) xmax=width-1;
+    for(x=xmin; x<=xmax; x++){
+      yuv[0][yi+x] = y;
+      yuv[1][yi+x] = u;
+      yuv[2][yi+x] = v;
+    }
+  }
+  return(0); // Done
+}
+///////////////////////////////////////////////////////////////////////////////
+
 /////////////////////////////////////////////////////////////
 // debugging functions to display digits - should be moved //
 /////////////////////////////////////////////////////////////
 int setsegments (uint8_t ** yuv, int width, int height, const int segments, const int x0, const int y0, const int seglen, const int Y, const int Cb, const int Cr, const float slope, const int bold){
   // display binary-coded digit, 1 bit per segment
   // 0..5 (abcdef) clockwise from top, 6 (g) dash, 7 dot
-  // TODO: slope, bold, xy bound checking  
+  // TODO: slope, bold, xy bound checking using fill_hparall
   unsigned int x, y, yi;
   if(segments & 1) { // a: horizontal, top
     yi=(y0-2*seglen)*width;
@@ -165,11 +255,11 @@ vj_effect *kaleidoscope_init(int w, int h)
   return ve;
 }
 
-static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, const int wt_pct, const unsigned int border_size_pct, int border_r, int border_g, int border_b, const int light_pct)
+static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_pct, const unsigned int border_size_pct, int border_r, int border_g, int border_b, const int light_pct)
 {
   // Probably a few off by one and rounding errors left
-  // Square kaleidoscope is not geometrically correct, some reflections should be simultaneously straight and inverted
-  // TODO: inverted triangle/diagonal
+  // Square "kaleidoscope" is not geometrically correct, some reflections should be simultaneously straight and inverted
+  // TODO: inverted triangle/diagonal (as extra types)
   uint8_t ** yuv = frame->data;
   int width = frame->width;
   int height = frame->height;
@@ -192,7 +282,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
   const int ht = wt*sin_a;
   // x changes by half the triangle width while y moves across the triangle height
   const float xslope=0.5*wt/ht; // about .577
-  // x0, y0 top left angle of the source triangle
+  // x0, y0 top left angle of the source triangle or rectangle
   const int y0=yc-ht/2;
   const int x0=xc-wt/2;
   // x1, y1 top right angle of the source triangle
@@ -201,11 +291,13 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
   // x2, y2 bottom angle of the source triangle
   const int y2=y0+ht;
   const int x2=xc;
+  // x1, y2 bottom right of source rectangle
   
   // general work variables
   int x, xr, xmin, xmax, xrmin, xrmax, y, yr; // ymin, ymax;
   // x, y, xmin, xmax absolute; xr, yr relative
   // Signed so that triangle truncate works!!
+  int x_offset;
   unsigned int yi, yi2; // offset in pixel array
   // uint8_t cb, cr;
   uint8_t border_y,border_u,border_v;
@@ -215,17 +307,21 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
   /////////////
   // Framing //
   /////////////
-  // Should be moved to separate functions
+  // Should be moved to separate functions or maybe separate effect
   
   // draw original triangle borders
   if (border_size_pct>0 && wt>0){
     border_size=wt*border_size_pct/300; // For triangle
     
-    if(with_triangles==1){
+    if(type==1){
       top_size=2*ht*border_size/(wt*sin_a);
       // TODO border type, 0, 1, 2 or 3 sides, with or without summit ==> 16 types
       
       // original triangle - draw sides
+      // fill_hparall causes artefacts at bigger size and width
+      fill_hparall(yuv, width, height, x0, y0, x2, y2, border_size/sin_a, border_y, border_u, border_v);
+      fill_hparall(yuv, width, height, x1-(border_size/sin_a), y1, x2-(border_size/sin_a), y2, border_size/sin_a, border_y, border_u, border_v);
+      /*
       for (yr = border_size; yr <= ht-top_size; yr++) {
 	if(y0+yr>=0 && y0+yr<height){
 	  yi = (y0+yr) * width;
@@ -245,6 +341,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
 	  }
 	}
       }
+      */
       
       // original triangle - draw trapezoidal base (at top)
       for (y=y0; y<=y0+border_size; y++){
@@ -259,7 +356,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
 	  }
 	}
       }
-      
+      /* Part of sides
       // original triangle - draw triangular summit (at bottom)
       if(top_size>0){
 	for (yr=0; yr<=top_size; yr++){
@@ -276,63 +373,20 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
 	  }
 	}
       }
+      */
       
       
     }else{ // Original rectangle borders
       border_size=wt*border_size_pct/200; // For rectangle
-      for(y=y0;y<=y2;y++){ // Vertical sides
-	if(y>=0 && y<height){
-	  yi=y*width;
-	  for (xr=0; xr<=border_size; xr++){
-	    if (x0+xr>=0 && x0+xr<width){
-	      yuv[0][yi+x0+xr] = border_y;
-	      yuv[1][yi+x0+xr] = border_u;
-	      yuv[2][yi+x0+xr] = border_v;
-	    }
-	    if (x1-xr>=0 && x1-xr<width){
-	      yuv[0][yi+x1-xr] = border_y;
-	      yuv[1][yi+x1-xr] = border_u;
-	      yuv[2][yi+x1-xr] = border_v;
-	    }
-	  }
-	}
-      }
-      for(x=x0+border_size;x<=x1-border_size;x++){ // Horizontal sides (no need to repaint corners)
-	if (x>=0 && x<width){
-	  for (yr=0; yr<border_size; yr++){
-	    if(y0+yr>=0 && y0+yr<height){
-	      yi=(y0+yr)*width;
-	      yuv[0][yi+x] = border_y;
-	      yuv[1][yi+x] = border_u;
-	      yuv[2][yi+x] = border_v;
-	    }
-	    if(y2-yr>=0 && y2-yr<height){
-	      yi=(y2-yr)*width;
-	      yuv[0][yi+x] = border_y;
-	      yuv[1][yi+x] = border_u;
-	      yuv[2][yi+x] = border_v;
-	    }
-	  }
-	}
-      }
+      fill_rectangle(yuv, width, height, x0, y0, x0+border_size, y2, border_y, border_u, border_v);
+      fill_rectangle(yuv, width, height, x1, y1, x1-border_size, y2, border_y, border_u, border_v);
+      fill_rectangle(yuv, width, height, x0+border_size, y0, x1-border_size, y0+border_size, border_y, border_u, border_v);
+      fill_rectangle(yuv, width, height, x0+border_size, y2-border_size, x1-border_size, y2, border_y, border_u, border_v);
     }
     
-    if(with_triangles==2 && ht>0){ // Original rectangle diagonal
-      for(x=x0;x<x1;x++){
-	xrmin=-(border_size*wt/ht)/2; // FIXME incorrect line width?
-	xrmax=(border_size*wt/ht)/2;
-	for (xr=xrmin; xr<=xrmax; xr++){
-	  if (x+xr>=0 && x+xr<width){
-	    yr=(x-x0)*ht/wt;
-	    if(y0+yr>=0 && y0+yr<height){
-	      yi=(y0+yr)*width;
-	      yuv[0][yi+x+xr] = border_y;
-	      yuv[1][yi+x+xr] = border_u;
-	      yuv[2][yi+x+xr] = border_v;
-	    }
-	  }
-	}
-      }
+    if(type==2 && ht>0){ // Original rectangle diagonal
+      float dborder_size=border_size; // FIXME
+      fill_hparall(yuv, width, height, x0-dborder_size/2, y0, x1-dborder_size/2, y2, dborder_size, border_y, border_u, border_v);
     }
     
   }
@@ -366,7 +420,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
   // First reflections //
   ///////////////////////
   // beware of bounds, a read outside the frame can cause a core dump
-  if(with_triangles==1){
+  if(type==1){
     for (yr = 0; yr <= ht; yr++) {
       y=y0+yr;
       if(y>=0 && y<height){
@@ -566,7 +620,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
     }
   }
   
-  if(with_triangles==2 && ht>0){ // Diagonally split rectangle pseudo-reflection
+  if(type==2 && ht>0){ // Diagonally split rectangle pseudo-reflection
     // TODO real reflection would require a different transform (keep pseudo as an option for visual fun)
     for (yr = 0; yr <= ht; yr++) {
       y=y0+yr;
@@ -584,19 +638,56 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
     }
   }
   
+  if(type==0 || type==2){ // Rectangle - needs first lateral reflections before copy
+    xmax=x0;
+    xmin=x1;
+    if(xmax>=0){ // Extra space left of initial reflections
+      for (yr = 0; yr <= ht; yr++) {
+	y=y0+yr;
+	if(y>=0 && y<height){
+	  yi = y * width;
+	  for (xr=wt; xr>=0;xr--){ // Reverse scan (leftward)
+	    xs=xmax+xr;
+	    x=xmax-xr;
+	    if(x>=0 && x<width && xs>=0 && xs<width){
+	      yuv[0][yi+x] = yuv[0][yi+xs]*light_coeff;
+	      yuv[1][yi+x] = yuv[1][yi+xs];
+	      yuv[2][yi+x] = yuv[2][yi+xs];
+	    }
+	  }
+	}
+      }
+    }
+    if(xmin<width){ // Extra space right of initial reflections
+      for (yr = 0; yr <= ht; yr++) {
+	y=y0+yr;
+	if(y>=0 && y<height){
+	  yi = y * width;
+	  for (xr=0; xr<=wt;xr++){ // Forward scan (rightward)
+	    xs=xmin-xr;
+	    x=xmin+xr;
+	    if(x>=0 && x<width && xs>=0 && xs<width){
+	      yuv[0][yi+x] = yuv[0][yi+xs]*light_coeff;
+	      yuv[1][yi+x] = yuv[1][yi+xs];
+	      yuv[2][yi+x] = yuv[2][yi+xs];
+	    }
+	  }
+	}
+      }
+    }
+  }
+
+  
   /////////////////////////
   // lateral reflections //
   /////////////////////////
   // FIXME attenuation wrong for edge half-triangles reflections
   // FIXME for rectangle, zone should be reflected, not copied
-  int x_offset;
-  x_offset=wt;
-  xmax=x0-1; // Start one pixel left of original rectangle, right to left
-  xmin=x1+1; // Start one pixel right of original rectangle, left to right
-  if (with_triangles==1){
+  x_offset=2*wt;
+  xmax=x0-1-wt; // Start one pixel left of first reflection, right to left
+  xmin=x1+1+wt; // Start one pixel right of first reflection, left to right
+  if (type==1){
     x_offset=3*wt;
-    xmin+=wt; // Right of original reflections
-    xmax-=wt; // Left of original reflections
   }
   if(xmax>=0){ // Extra space left of initial reflections
     for (yr = 0; yr <= ht; yr++) {
@@ -691,8 +782,8 @@ static void kaleidoscope( VJFrame* frame, const unsigned int with_triangles, con
   
 }
 
-void kaleidoscope_apply( VJFrame *frame, int with_triangles, int wt, int border, int border_r, int border_g, int border_b, int light_pct )
+void kaleidoscope_apply( VJFrame *frame, int type, int wt, int border, int border_r, int border_g, int border_b, int light_pct )
 {
-  kaleidoscope(frame, with_triangles, wt, border, border_r, border_g, border_b, light_pct);
+  kaleidoscope(frame, type, wt, border, border_r, border_g, border_b, light_pct);
   frame_index++;
 }
