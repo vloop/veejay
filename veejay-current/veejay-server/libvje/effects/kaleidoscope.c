@@ -260,6 +260,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
   // Probably a few off by one and rounding errors left
   // Square "kaleidoscope" is not geometrically correct, some reflections should be simultaneously straight and inverted
   // TODO: inverted triangle/diagonal (as extra types)
+  // TODO: compute initial reflections in a buffer so that they are never truncated and reflection 2 can always use reflection 1
   uint8_t ** yuv = frame->data;
   int width = frame->width;
   int height = frame->height;
@@ -302,7 +303,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
   // uint8_t cb, cr;
   uint8_t border_y,border_u,border_v;
   _rgb2yuv( border_r,border_g,border_b,border_y,border_u,border_v );
-  int border_size, top_size;
+  int border_size, border_mod_size, top_size;
   
   /////////////
   // Framing //
@@ -312,15 +313,18 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
   // draw original triangle borders
   if (border_size_pct>0 && wt>0){
     border_size=wt*border_size_pct/300; // For triangle
+    border_mod_size=border_size/sin_a;
     
-    if(type==1){
+    if(type==1){ // Triangle
       top_size=2*ht*border_size/(wt*sin_a);
       // TODO border type, 0, 1, 2 or 3 sides, with or without summit ==> 16 types
       
       // original triangle - draw sides
       // fill_hparall causes artefacts at bigger size and width
-      fill_hparall(yuv, width, height, x0, y0, x2, y2, border_size/sin_a, border_y, border_u, border_v);
-      fill_hparall(yuv, width, height, x1-(border_size/sin_a), y1, x2-(border_size/sin_a), y2, border_size/sin_a, border_y, border_u, border_v);
+      // fill_hparall(yuv, width, height, x0, y0, x2, y2, border_size/sin_a, border_y, border_u, border_v);
+      // fill_hparall(yuv, width, height, x1-(border_size/sin_a), y1, x2-(border_size/sin_a), y2, border_size/sin_a, border_y, border_u, border_v);
+      fill_hparall(yuv, width, height, x0-border_mod_size, y0, x2-border_mod_size, y2, 2*border_mod_size, border_y, border_u, border_v); // Double width
+      fill_hparall(yuv, width, height, x1-border_mod_size, y1, x2-border_mod_size, y2, 2*border_mod_size, border_y, border_u, border_v); // Double width
       /*
       for (yr = border_size; yr <= ht-top_size; yr++) {
 	if(y0+yr>=0 && y0+yr<height){
@@ -344,6 +348,8 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
       */
       
       // original triangle - draw trapezoidal base (at top)
+      fill_rectangle(yuv, width, height, x0, y0-border_size, x1, y0+border_size, border_y, border_u, border_v); // Double width
+/*
       for (y=y0; y<=y0+border_size; y++){
 	if(y>=0 && y<height){
 	  yi=y*width;
@@ -356,6 +362,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
 	  }
 	}
       }
+*/
       /* Part of sides
       // original triangle - draw triangular summit (at bottom)
       if(top_size>0){
@@ -385,7 +392,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
     }
     
     if(type==2 && ht>0){ // Original rectangle diagonal
-      float dborder_size=border_size; // FIXME
+      float dborder_size=2*border_size/sin(M_PI/4); // FIXME rectangle is not a square
       fill_hparall(yuv, width, height, x0-dborder_size/2, y0, x1-dborder_size/2, y2, dborder_size, border_y, border_u, border_v);
     }
     
@@ -420,7 +427,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
   // First reflections //
   ///////////////////////
   // beware of bounds, a read outside the frame can cause a core dump
-  if(type==1){
+  if(type==1){ // Triangle
     for (yr = 0; yr <= ht; yr++) {
       y=y0+yr;
       if(y>=0 && y<height){
@@ -474,71 +481,76 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
 	    yuv[2][yi+x] = yuv[2][yi2+xs];
 	  }  
 	}
+      }
+    }
 
-	// left triangle 2
-	// left triangle 1 reflection = source triangle rotation !!
-	// TODO skip completely if off-screen
-	xmin=x0-wt+yr*xslope;
-	xmax=x0-yr*xslope;
-	if (xmin<0)
-	  xmin=0;
-	if (xmax<0)
-	  xmax=0;
-	if (xmin>=width) xmin=width-1;
-	if (xmax>=width) xmax=width-1; // should not happen on left reflections
-	for (x = xmin; x <= xmax; x++) {
-	  xr = x-x0; // <0 for left triangle 2
-	  // rotation -2a
-	  xrs = xr*cos_2a + yr*sin_2a;
-	  yrs = -xr*sin_2a + yr*cos_2a;
-	  xs=x0+xrs;
-	  ys=y0+yrs;
-	  if(xs>=0 && xs<width && ys>=0 && ys<height){
-	    yi2=width*ys;
-	    yuv[0][yi+x] = yuv[0][yi2+xs]*light_coeff;
-	    yuv[1][yi+x] = yuv[1][yi2+xs];
-	    yuv[2][yi+x] = yuv[2][yi2+xs];
-	    
-	    // Highlight source for debugging
-	    // yuv[0][yi2+xs]=0;
-	    // yuv[1][yi2+xs]=0;
-	    // yuv[2][yi2+xs]=0;
-	    
-	  }else{
-	    yuv[0][yi+x] = 0;
-	    yuv[1][yi+x] = 0;
-	    yuv[2][yi+x] = 255;
+    // 2nd triangular reflection
+    for (yr = 0; yr <= ht; yr++) {
+      y=y0+yr;
+      if(y>=0 && y<height){
+	yi = y * width;
+	ys = y2 - yr;
+        if(ys>=0 && ys<height){
+	  // yi2 = ys * width; // Outside x-loop for reflection
+	  
+	  // left triangle 2
+	  // left triangle 1 reflection = source triangle rotation = right triangle 1 inversion !!
+	  // TODO skip completely if off-screen
+	  xmin=x0-wt+yr*xslope;
+	  xmax=x0-yr*xslope;
+	  if (xmin<0) xmin=0;
+	  if (xmax>=width) xmax=width-1;
+	  if (xmax>=0 && xmin<width){
+	    for (x = xmin; x <= xmax; x++) {
+	      // source triangle rotation -2a
+	      xr = x-x0; // <0 for left triangle 2
+	      xrs = xr*cos_2a + yr*sin_2a;
+	      yrs = -xr*sin_2a + yr*cos_2a;
+	      xs=x0+xrs;
+	      ys=y0+yrs;
+	      // 1st right reflection's reflection
+	      // Mostly ok but what if right triangle 1 is partly off-screen? will create visible artefacts
+	      // xs=x+(wt*1.5);
+	      if(xs>=0 && xs<width && ys>=0 && ys<height){
+		yi2=width*ys; // Inside x-loop for rotation
+		yuv[0][yi+x] = yuv[0][yi2+xs]*light_coeff*light_coeff;
+		yuv[1][yi+x] = yuv[1][yi2+xs];
+		yuv[2][yi+x] = yuv[2][yi2+xs];
+	      }
+	    }
 	  }
-	}
-	
-	// right triangle 2
-	// right triangle 1 reflection = source triangle rotation !!
-	// TODO skip completely if off-screen
-	xmin=x1+yr*xslope;
-	xmax=x1+wt-yr*xslope;
-	if (xmin<0) xmin=0; // should not happen on right reflections
-	if (xmax<0) xmax=0;
-	if (xmax>=width) xmax=width-1;
-	if (xmin>=width) xmin=width-1;
-	// if (xmax>width) xmax=width; // should not happen on left reflections
-	for (x = xmin; x <= xmax; x++) {
-	  xr = x-x1; // <0 for left triangle 2
-	  // rotation +2a
-	  xrs = xr*cos_2a - yr*sin_2a;
-	  yrs = xr*sin_2a + yr*cos_2a;
-	  xs=x1+xrs;
-	  ys=y1+yrs;
-	  if(xs>=0 && xs<width && ys>=0 && ys<height){
-	    yi2=width*ys;
-	    yuv[0][yi+x] = yuv[0][yi2+xs]*light_coeff;
-	    yuv[1][yi+x] = yuv[1][yi2+xs];
-	    yuv[2][yi+x] = yuv[2][yi2+xs];
+	  
+	  // right triangle 2
+	  // right triangle 1 reflection = source triangle rotation !!
+	  // TODO skip completely if off-screen
+	  xmin=x1+yr*xslope;
+	  xmax=x1+wt-yr*xslope;
+	  if (xmin<0) xmin=0;
+	  if (xmax>=width) xmax=width-1;
+	  if (xmax>=0 && xmin<width){
+	    for (x = xmin; x <= xmax; x++) {
+	      // rotation +2a
+	      xr = x-x1; // <0 for left triangle 2
+	      xrs = xr*cos_2a - yr*sin_2a;
+	      yrs = xr*sin_2a + yr*cos_2a;
+	      xs=x1+xrs;
+	      ys=y1+yrs;
+	      // 1st right reflection's reflection
+	      // xs=x-(wt*1.5);
+	      if(xs>=0 && xs<width && ys>=0 && ys<height){
+		yi2=width*ys; // For rotation
+		yuv[0][yi+x] = yuv[0][yi2+xs]*light_coeff*light_coeff;
+		yuv[1][yi+x] = yuv[1][yi2+xs];
+		yuv[2][yi+x] = yuv[2][yi2+xs];
+	      }
+	    }
 	  }
 	}
       }
     }
     
-    for (yr = 0; yr < ht; yr++) {
+    // Third triangular reflection
+    for (yr = 0; yr <= ht; yr++) {
       y=y0+yr;
       if(y>=0 && y<height){
 	yi = y * width;
@@ -555,7 +567,6 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
 	if (xmax<0) xmax=0;
 	if (xmax>=width) xmax=width-1;
 	if (xmin>=width) xmin=width-1;
-	// if (xmax>width) xmax=width; // should not happen on left reflections
 	for (x = xmin; x <= xmax; x++) {
 	  xr2 = x-(x2+wt);
 	  // rotation -2a
@@ -568,16 +579,6 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
 	    yuv[0][yi+x] = yuv[0][yi2+xs]*light_coeff;
 	    yuv[1][yi+x] = yuv[1][yi2+xs];
 	    yuv[2][yi+x] = yuv[2][yi2+xs];
-	    
-	    // Highlight source for debugging
-	    // yuv[0][yi2+xs]=0;
-	    // yuv[1][yi2+xs]=0;
-	    // yuv[2][yi2+xs]=0;
-	    
-	  }else{
-	    yuv[0][yi+x] = 0;
-	    yuv[1][yi+x] = 0;
-	    yuv[2][yi+x] = 255;
 	  }
 	}
 	
@@ -604,16 +605,6 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
 	    yuv[0][yi+x] = yuv[0][yi2+xs]*light_coeff;
 	    yuv[1][yi+x] = yuv[1][yi2+xs];
 	    yuv[2][yi+x] = yuv[2][yi2+xs];
-	    
-	    // Highlight source for debugging
-	    // yuv[0][yi2+xs]=0;
-	    // yuv[1][yi2+xs]=0;
-	    // yuv[2][yi2+xs]=0;
-	    
-	  }else{
-	    yuv[0][yi+x] = 0;
-	    yuv[1][yi+x] = 0;
-	    yuv[2][yi+x] = 255;
 	  }
 	}    
       }
@@ -677,12 +668,14 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
     }
   }
 
+  // FIXME some triangle border artifacts could be cleaned by re-drawing borders for initial reflections
+  // But would better fix possibly off-by-one reflection
   
   /////////////////////////
   // lateral reflections //
   /////////////////////////
   // FIXME attenuation wrong for edge half-triangles reflections
-  // FIXME for rectangle, zone should be reflected, not copied
+  // Attenuation factor should be squared only outside those half-triangles
   x_offset=2*wt;
   xmax=x0-1-wt; // Start one pixel left of first reflection, right to left
   xmin=x1+1+wt; // Start one pixel right of first reflection, left to right
@@ -696,7 +689,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
 	yi = y * width;
 	for (x=xmax; x>=0;x--){ // Reverse scan so it can copy itself
 	  // Main pattern is 1 or 3 * wt wide and starts at x0-wt
-	  yuv[0][yi+x] = yuv[0][yi+x+x_offset]*light_coeff;
+	  yuv[0][yi+x] = yuv[0][yi+x+x_offset]*light_coeff*light_coeff;
 	  yuv[1][yi+x] = yuv[1][yi+x+x_offset];
 	  yuv[2][yi+x] = yuv[2][yi+x+x_offset];
 	}
@@ -710,7 +703,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
 	yi = y * width;
 	for (x=xmin; x<width;x++){ // Forward scan so it can copy itself
 	  // Main pattern is 1 or 3 * wt wide and starts at x0-wt
-	  yuv[0][yi+x] = yuv[0][yi+x-x_offset]*light_coeff;
+	  yuv[0][yi+x] = yuv[0][yi+x-x_offset]*light_coeff*light_coeff;
 	  yuv[1][yi+x] = yuv[1][yi+x-x_offset];
 	  yuv[2][yi+x] = yuv[2][yi+x-x_offset];
 	}
@@ -718,6 +711,69 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
     }
   }
   
+  if (type==1){ // Ugly partial fix for wrong attenuation
+      // Multiples copies may have occurred, this only fixes the 1st one
+      // This fix should be applied after 1st and before 2nd copy instead of after all copies
+      for (yr = 0; yr <= ht; yr++) {
+      y=y0+yr;
+      if(y>=0 && y<height){
+	yi = y * width;
+	yr2=y-y2; // Relative to bottom of original triangle
+	
+	// Half right triangle 3
+	// right triangle 2 reflection = right triangle 1 rotation !!
+	// needs 1st y loop to be complete, hence has its own y loop
+	// only left half needed ?
+	// TODO skip completely if off-screen
+	xmin=x1+wt;// -yr*xslope; // From top
+	xmax=x1+wt+yr*xslope; // comment out slope for left half only
+	if (xmin<0) xmin=0; // should not happen on right reflections
+	if (xmax<0) xmax=0;
+	if (xmax>=width) xmax=width-1;
+	if (xmin>=width) xmin=width-1;
+	// if (xmax>width) xmax=width; // should not happen on left reflections
+	for (x = xmin; x <= xmax; x++) {
+	  xr2 = x-(x2+wt);
+	  // rotation -2a
+	  xrs = xr2*cos_2a + yr2*sin_2a;
+	  yrs = - xr2*sin_2a + yr2*cos_2a;
+	  xs=x2+wt+xrs;
+	  ys=y2+yrs;
+	  if(xs>=0 && xs<width && ys>=0 && ys<height){
+	    yi2=width*ys;
+	    yuv[0][yi+x] = yuv[0][yi2+xs] * light_coeff;
+	    yuv[1][yi+x] = yuv[1][yi2+xs];
+	    yuv[2][yi+x] = yuv[2][yi2+xs];
+	  }
+	}
+	// Half left triangle 3
+	// left triangle 2 reflection = left triangle 2 rotation !!
+	// TODO skip completely if off-screen
+	xmin=x0-wt-yr*xslope; // Right half-triangle only
+	xmax=x0-wt; // +yr*xslope;
+	if (xmin<0)
+	  xmin=0;
+	if (xmax<0)
+	  xmax=0;
+	if (xmax>=width) xmax=width-1;
+	if (xmin>=width) xmin=width-1;
+	for (x = xmin; x <= xmax; x++) {
+	  xr2 = x-(x2-wt); // <0 for left triangle 3
+	  // rotation -2a
+	  xrs = xr2*cos_2a - yr2*sin_2a;
+	  yrs = xr2*sin_2a + yr2*cos_2a;
+	  xs=x2-wt+xrs;
+	  ys=y2+yrs;
+	  if(xs>=0 && xs<width && ys>=0 && ys<height){
+	    yi2=width*ys;
+	    yuv[0][yi+x] = yuv[0][yi2+xs] * light_coeff;
+	    yuv[1][yi+x] = yuv[1][yi2+xs];
+	    yuv[2][yi+x] = yuv[2][yi2+xs];
+	  }
+	}    
+      }
+    }
+  }
   //////////////////////////
   // vertical reflections //
   //////////////////////////
