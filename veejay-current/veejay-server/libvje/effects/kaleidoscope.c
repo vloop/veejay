@@ -27,7 +27,7 @@
 ////////////////////////////////////
 // Utilities - possibly redundant //
 ////////////////////////////////////
-int fill_rectangle(uint8_t ** yuv, const unsigned int width, const unsigned int height, const int x0, const int y0, const int x1, const int y1, const uint8_t y, const uint8_t u, const uint8_t v){
+int fill_rectangle(uint8_t ** yuv, const unsigned int width, const unsigned int height, const int x0, const int y0, const int x1, const int y1, const uint8_t Y, const uint8_t u, const uint8_t v){
   int yi;
   int x, xmin, xmax, ys, ymin, ymax;
   
@@ -53,10 +53,9 @@ int fill_rectangle(uint8_t ** yuv, const unsigned int width, const unsigned int 
   if (ymax<0) return(-1); // Off-screen
   if (ymax>=height) ymax=height-1;
   
-  yi=ymin * width;
-  for (ys=ymin; ys<=ymax; ys++, yi+=width){
+  for (ys=ymin, yi=ymin * width; ys<=ymax; ys++, yi+=width){
     for(x=xmin; x<=xmax; x++){
-      yuv[0][yi+x] = y;
+      yuv[0][yi+x] = Y;
       yuv[1][yi+x] = u;
       yuv[2][yi+x] = v;
     }
@@ -64,24 +63,15 @@ int fill_rectangle(uint8_t ** yuv, const unsigned int width, const unsigned int 
   return(0); // Done
 }
 
-int fill_hparall (uint8_t ** yuv, const unsigned int width, const unsigned int height, const int x0, const int y0, const int x1, const int y1, const int xsize, const uint8_t y, const uint8_t u, const uint8_t v){
+int fill_hparall (uint8_t ** yuv, const unsigned int width, const unsigned int height, const int x0, const int y0, const int x1, const int y1, const int xsize, const uint8_t Y, const uint8_t u, const uint8_t v){
   int yi;
-  int x, xtop, xmin, xbot, xmax, yr, ymin, ymax;
+  int x, xtop, xmin, xbot, xmax, y, yr, ymin, ymax, xoffset;
   float xslope;
   // x0, y0 should be top left and x1, y1 bottom left
   // This function handles truncate to display
-  // TODO vertical slope is rectangle
-  if(x0==x1 || y0==y1) return(-2);
+  if(xsize<=0) return(0); // Could we honor negative size as leftward?
   xtop=x0;
   xbot=x1;
-  xmin=x0;
-  xmax=x1;
-  if (xmin>xmax){
-    xmin=x1;
-    xmax=x0;
-  }
-  // if (xmin>=width) return(-1); // Completely off-screen
-  // if (xmax<0) return(-1); // Completely off-screen
   
   ymin=y0;
   ymax=y1;
@@ -89,23 +79,48 @@ int fill_hparall (uint8_t ** yuv, const unsigned int width, const unsigned int h
     ymin=y1; xtop=x1;
     ymax=y0; xbot=x0;
   }
-  xslope=(float)(xbot-xtop)/(ymax-ymin);// Compute slope before truncate !!
-
-  if (ymin<0) ymin=0; // Truncate left - TODO should fix x
+   
+  xmin=x0;
+  xmax=x1;
+  if (xmin>xmax){
+    xmin=x1;
+    xmax=x0;
+  }
+  
+  // if (xmin>=width) return(-1); // Completely off-screen
+  // if (xmax<0) return(-1); // Completely off-screen
+  
+  if(ymin==ymax){ // horizontal line
+    xslope=0; // Will be used when ymin=ymax
+    xoffset=xsize+xmax-xmin; // Extend to segment length
+  }else{
+    xslope=(float)(xbot-xtop)/(ymax-ymin);// Compute slope before truncate !!
+    xoffset=xsize;
+    if (xoffset<xslope) xoffset+=xslope-1; // Avoid gaps in near-horizontal lines
+  }
+  
+  if (ymin<0){
+    xtop+=ymin*xslope; // FIXME ?
+    ymin=0; // Truncate left
+  }
   if (ymin>=height) return(-1); // Completely off-screen
   if (ymax<0) return(-1); // Completely off-screen
-  if (ymax>=height) ymax=height-1; // Truncate right - TODO should fix x
+  if (ymax>=height){
+    // xbot-=(ymax-(height-1))*xslope; // Not used below
+    ymax=height-1; // Truncate right
+  }
   
-  yi=ymin * width;
-  for (yr=0; yr<=ymax-ymin; yr++, yi+=width){
-    xmin=xtop+yr*xslope;
-    xmax=xmin+xsize;
+//  for (yr=0; yr<=ymax-ymin; yr++, yi+=width){
+    
+    for (y=ymin, yi=ymin*width; y<=ymax; y++, yi+=width){
+    xmin=xtop+(y-ymin)*xslope;
+    xmax=xmin+xoffset;
     if (xmin<0) xmin=0;
     if (xmin>=width) continue; // Row off-screen
     if (xmax<0) continue; // Row off-screen
     if (xmax>=width) xmax=width-1;
     for(x=xmin; x<=xmax; x++){
-      yuv[0][yi+x] = y;
+      yuv[0][yi+x] = Y;
       yuv[1][yi+x] = u;
       yuv[2][yi+x] = v;
     }
@@ -117,72 +132,48 @@ int fill_hparall (uint8_t ** yuv, const unsigned int width, const unsigned int h
 /////////////////////////////////////////////////////////////
 // debugging functions to display digits - should be moved //
 /////////////////////////////////////////////////////////////
-int setsegments (uint8_t ** yuv, int width, int height, const int segments, const int x0, const int y0, const int seglen, const int Y, const int Cb, const int Cr, const float slope, const int bold){
+int setsegments (uint8_t ** yuv, int width, int height, const int segments, const int x0, const int y0, const int seglen, const int Y, const int Cb, const int Cr, const float slope, const unsigned int bold){
   // display binary-coded digit, 1 bit per segment
-  // 0..5 (abcdef) clockwise from top, 6 (g) dash, 7 dot
+  // bits 0..5 (abcdef) clockwise from top, 6 (g) dash, 7 dot
+  // x0, y0 = bottom left
   // TODO: slope, bold, xy bound checking using fill_hparall
   unsigned int x, y, yi;
-  if(segments & 1) { // a: horizontal, top
-    yi=(y0-2*seglen)*width;
-    for (x=x0; x<x0+seglen; x++){
-      yuv[0][yi+x] = Y;
-      yuv[1][yi+x] = Cb;
-      yuv[2][yi+x] = Cr;
-    }
+  if(segments & 1) { // segment a: horizontal, top
+    x=x0+(2*seglen*slope);
+    y=y0-2*seglen;
+    fill_hparall(yuv, width, height, x, y, x+seglen-bold*slope, y+bold, bold+1, Y, Cb, Cr);
   }
-  if(segments & 2) { // b: vertical, top right
-    x=x0+seglen;
-    for(y=y0-seglen; y>y0-seglen*2; y--){
-      yi=y*width;
-      yuv[0][yi+x] = Y;
-      yuv[1][yi+x] = Cb;
-      yuv[2][yi+x] = Cr;
-    }
+  if(segments & 2) { // segment b: vertical, top right
+    x=x0+seglen+2*seglen*slope;
+    y=y0-2*seglen;
+    fill_hparall(yuv, width, height, x, y, x+bold-seglen*slope, y+seglen, bold+1, Y, Cb, Cr);
   }
-  if(segments & 4) { // c: vertical, bottom right
-    x=x0+seglen;
-    for(y=y0; y>y0-seglen; y--){
-      yi=y*width;
-      yuv[0][yi+x] = Y;
-      yuv[1][yi+x] = Cb;
-      yuv[2][yi+x] = Cr;
-    }
+  if(segments & 4) { // segment c: vertical, bottom right
+    x=x0+seglen+seglen*slope;
+    y=y0-seglen;
+    fill_hparall(yuv, width, height, x, y, x+bold-seglen*slope, y+seglen, bold+1, Y, Cb, Cr);
   }
-  if(segments & 8) { // d: horizontal, bottom
-    yi=y0*width;
-    for (x=x0; x<x0+seglen; x++){
-      yuv[0][yi+x] = Y;
-      yuv[1][yi+x] = Cb;
-      yuv[2][yi+x] = Cr;
-    }
-  }
-  if(segments & 16) { // e: vertical, bottom left
+  if(segments & 8) { // segment d: horizontal, bottom
     x=x0;
-    for(y=y0; y>y0-seglen; y--){
-      yi=y*width;
-      yuv[0][yi+x] = Y;
-      yuv[1][yi+x] = Cb;
-      yuv[2][yi+x] = Cr;
-    }
+    y=y0;
+    fill_hparall(yuv, width, height, x, y, x+seglen-bold*slope, y+bold, bold+1, Y, Cb, Cr);
   }
-  if(segments & 32) { // f: vertical, top left
+  if(segments & 16) { // segment e: vertical, bottom left
+    x=x0+seglen*slope;
+    y=y0-seglen;
+    fill_hparall(yuv, width, height, x, y, x+bold-seglen*slope, y+seglen, bold+1, Y, Cb, Cr);
+  }
+  if(segments & 32) { // segment f: vertical, top left
+    x=x0+2*seglen*slope;
+    y=y0-2*seglen;
+    fill_hparall(yuv, width, height, x, y, x+bold-seglen*slope, y+seglen, bold+1, Y, Cb, Cr);
+  }
+  if(segments & 64) { // segment g: horizontal, middle  
     x=x0;
-    for(y=y0-seglen; y>y0-seglen*2; y--){
-      yi=y*width;
-      yuv[0][yi+x] = Y;
-      yuv[1][yi+x] = Cb;
-      yuv[2][yi+x] = Cr;
-    }
+    y=y0-seglen;
+    fill_hparall(yuv, width, height, x, y, x+seglen-bold*slope, y+bold, bold+1, Y, Cb, Cr);
   }
-  if(segments & 64) { // g: horizontal, middle
-    yi=(y0-seglen)*width;
-    for (x=x0; x<x0+seglen; x++){
-      yuv[0][yi+x] = Y;
-      yuv[1][yi+x] = Cb;
-      yuv[2][yi+x] = Cr;
-    }
-  }
-  if(segments & 128) { // dot bottom right
+  if(segments & 128) { // dot bottom right FIXME
     yi=(y0+2)*width;
     x=x0+seglen+2;
     yuv[0][yi+x] = Y;
@@ -303,7 +294,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
   // uint8_t cb, cr;
   uint8_t border_y,border_u,border_v;
   _rgb2yuv( border_r,border_g,border_b,border_y,border_u,border_v );
-  int border_size, border_mod_size, top_size;
+  int border_size=0, border_mod_size=0, top_size=0;
   
   /////////////
   // Framing //
@@ -316,54 +307,18 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
     border_mod_size=border_size/sin_a;
     
     if(type==1){ // Triangle
-      top_size=2*ht*border_size/(wt*sin_a);
       // TODO border type, 0, 1, 2 or 3 sides, with or without summit ==> 16 types
       
       // original triangle - draw sides
-      // fill_hparall causes artefacts at bigger size and width
-      // fill_hparall(yuv, width, height, x0, y0, x2, y2, border_size/sin_a, border_y, border_u, border_v);
-      // fill_hparall(yuv, width, height, x1-(border_size/sin_a), y1, x2-(border_size/sin_a), y2, border_size/sin_a, border_y, border_u, border_v);
+      // fill_hparall may cause artefacts at bigger size and width
       fill_hparall(yuv, width, height, x0-border_mod_size, y0, x2-border_mod_size, y2, 2*border_mod_size, border_y, border_u, border_v); // Double width
       fill_hparall(yuv, width, height, x1-border_mod_size, y1, x2-border_mod_size, y2, 2*border_mod_size, border_y, border_u, border_v); // Double width
-      /*
-      for (yr = border_size; yr <= ht-top_size; yr++) {
-	if(y0+yr>=0 && y0+yr<height){
-	  yi = (y0+yr) * width;
-	  xmin=x0+yr*xslope;
-	  xmax=x1-yr*xslope+1;
-	  for(xr=0; xr<=border_size/sin_a; xr++){
-	    if (xmin+xr>=0 && xmin+xr<width){
-	      yuv[0][yi+xmin+xr] = border_y;
-	      yuv[1][yi+xmin+xr] = border_u;
-	      yuv[2][yi+xmin+xr] = border_v;
-	    }
-	    if (xmax-xr>=0 && xmax-xr<width){
-	      yuv[0][yi+xmax-xr] = border_y;
-	      yuv[1][yi+xmax-xr] = border_u;
-	      yuv[2][yi+xmax-xr] = border_v;
-	    }
-	  }
-	}
-      }
-      */
       
       // original triangle - draw trapezoidal base (at top)
       fill_rectangle(yuv, width, height, x0, y0-border_size, x1, y0+border_size, border_y, border_u, border_v); // Double width
-/*
-      for (y=y0; y<=y0+border_size; y++){
-	if(y>=0 && y<height){
-	  yi=y*width;
-	  for(x=x0+(y-y0)*xslope; x<=x1-(y-y0)*xslope+1; x++){
-	    if (x>=0 && x<width){
-	      yuv[0][yi+x] = border_y;
-	      yuv[1][yi+x] = border_u;
-	      yuv[2][yi+x] = border_v;
-	    }
-	  }
-	}
-      }
-*/
-      /* Part of sides
+
+      /*
+      top_size=2*ht*border_size/(wt*sin_a);
       // original triangle - draw triangular summit (at bottom)
       if(top_size>0){
 	for (yr=0; yr<=top_size; yr++){
@@ -395,7 +350,6 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
       float dborder_size=2*border_size/sin(M_PI/4); // FIXME rectangle is not a square
       fill_hparall(yuv, width, height, x0-dborder_size/2, y0, x1-dborder_size/2, y2, dborder_size, border_y, border_u, border_v);
     }
-    
   }
   
   
@@ -405,17 +359,18 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
     const unsigned int seglen=12, lineheigth=3*seglen;
     x=xc-3*seglen;
     y=yc+lineheigth;
+    
+    fill_hparall(yuv, width, height, x, y+4, x+50, y+4, 1, 255, 128, 128); // Horizontal
+    fill_hparall(yuv, width, height, x, y+6, x+50, y+7, 1, 255, 128, 128); // Near-horizontal
+    
     showhexdigits(yuv, width, height, border_size/xslope, x, y, seglen, 255, 0, 0);
-    showhexdigits(yuv, width, height, border_size/xslope, x+1, y+1, seglen, 255, 0, 0);
+    //showhexdigits(yuv, width, height, border_size/xslope, x+1, y+1, seglen, 255, 0, 0);// Pseudo-bold
     y-=lineheigth;
     showhexdigits(yuv, width, height, border_size, x, y, seglen, 255, 255, 0);
-    showhexdigits(yuv, width, height, border_size, x+1, y+1, seglen, 255, 255, 0);
     y-=lineheigth;
     showhexdigits(yuv, width, height, frame_index, x, y, seglen, 0, 255, 255);
-    showhexdigits(yuv, width, height, frame_index, x+1, y+1, seglen, 0, 255, 255);
     y-=lineheigth;
     showhexdigits(yuv, width, height, (int)timecode, x, y, seglen, 0, 0, 255);
-    showhexdigits(yuv, width, height, (int)timecode, x+1, y+1, seglen, 0, 0, 255);
     return;
   }
   
@@ -483,6 +438,15 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
 	}
       }
     }
+    // Defeat rounding, redraw edge; ugly but works
+    // except when wt ~ width with large borders
+    if(border_size>0){
+// ok for large size, KO for small (overwrites source triangle)
+//      fill_rectangle(yuv, width, height, x2-wt, y2-border_size, x2, y2, border_y*light_coeff, border_u, border_v);
+//      fill_rectangle(yuv, width, height, x2, y2-border_size, x2+wt, y2, border_y*light_coeff, border_u, border_v);
+      fill_rectangle(yuv, width, height, x2-wt, y2-border_size, x2-border_mod_size/2, y2, border_y*light_coeff, border_u, border_v);
+      fill_rectangle(yuv, width, height, x2+border_mod_size/2, y2-border_size, x2+wt, y2, border_y*light_coeff, border_u, border_v);
+    }
 
     // 2nd triangular reflection
     for (yr = 0; yr <= ht; yr++) {
@@ -548,6 +512,11 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
 	}
       }
     }
+    // Defeat rounding, redraw edge; ugly but works
+    if(border_size>0){
+      fill_rectangle(yuv, width, height, x0-wt+border_size, y0, x0-border_size, y0+border_size, border_y*light_coeff*light_coeff, border_u, border_v);
+      fill_rectangle(yuv, width, height, x1+border_size, y0, x1+wt-border_size, y0+border_size, border_y*light_coeff*light_coeff, border_u, border_v);
+    }
     
     // Third triangular reflection
     for (yr = 0; yr <= ht; yr++) {
@@ -576,7 +545,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
 	  ys=y2+yrs;
 	  if(xs>=0 && xs<width && ys>=0 && ys<height){
 	    yi2=width*ys;
-	    yuv[0][yi+x] = yuv[0][yi2+xs]*light_coeff;
+	    yuv[0][yi+x] = yuv[0][yi2+xs]*light_coeff*light_coeff;
 	    yuv[1][yi+x] = yuv[1][yi2+xs];
 	    yuv[2][yi+x] = yuv[2][yi2+xs];
 	  }
@@ -602,13 +571,14 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
 	  ys=y2+yrs;
 	  if(xs>=0 && xs<width && ys>=0 && ys<height){
 	    yi2=width*ys;
-	    yuv[0][yi+x] = yuv[0][yi2+xs]*light_coeff;
+	    yuv[0][yi+x] = yuv[0][yi2+xs]*light_coeff*light_coeff;
 	    yuv[1][yi+x] = yuv[1][yi2+xs];
 	    yuv[2][yi+x] = yuv[2][yi2+xs];
 	  }
 	}    
       }
     }
+    // Edge redrawing deferred to attenuation ugly fix
   }
   
   if(type==2 && ht>0){ // Diagonally split rectangle pseudo-reflection
@@ -741,13 +711,13 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
 	  ys=y2+yrs;
 	  if(xs>=0 && xs<width && ys>=0 && ys<height){
 	    yi2=width*ys;
-	    yuv[0][yi+x] = yuv[0][yi2+xs] * light_coeff;
+	    yuv[0][yi+x] = yuv[0][yi2+xs] * light_coeff * light_coeff;
 	    yuv[1][yi+x] = yuv[1][yi2+xs];
 	    yuv[2][yi+x] = yuv[2][yi2+xs];
 	  }
 	}
 	// Half left triangle 3
-	// left triangle 2 reflection = left triangle 2 rotation !!
+	// left triangle 1 reflection = left triangle 2 rotation !!
 	// TODO skip completely if off-screen
 	xmin=x0-wt-yr*xslope; // Right half-triangle only
 	xmax=x0-wt; // +yr*xslope;
@@ -766,19 +736,25 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
 	  ys=y2+yrs;
 	  if(xs>=0 && xs<width && ys>=0 && ys<height){
 	    yi2=width*ys;
-	    yuv[0][yi+x] = yuv[0][yi2+xs] * light_coeff;
+	    yuv[0][yi+x] = yuv[0][yi2+xs] * light_coeff * light_coeff;
 	    yuv[1][yi+x] = yuv[1][yi2+xs];
 	    yuv[2][yi+x] = yuv[2][yi2+xs];
 	  }
 	}    
       }
     }
+    // Defeat rounding, redraw edge; ugly but works
+    if(border_size>0){
+      fill_rectangle(yuv, width, height, x2-2*wt+border_size, y2, x2-wt-border_size, y2-border_size, border_y*light_coeff*light_coeff*light_coeff, border_u, border_v);
+      fill_rectangle(yuv, width, height, x2+wt+border_size, y2, x2+2*wt-border_size, y2-border_size, border_y*light_coeff*light_coeff*light_coeff, border_u, border_v);
+    }
+
   }
   //////////////////////////
   // vertical reflections //
   //////////////////////////
   if (y0>0) { // First reflections above original
-    for (y=y0;y>y0-ht && y>0;y--){
+    for (y=y0;y>y0-ht && y>=0;y--){
       yi = y * width;
       yr = y - y0;
       yi2 = (y0-yr)* width; // Source 1 triangle height below, inverted
@@ -807,11 +783,11 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
   }
   
   if (y0>ht) { // Extra space above initial reflections
-    for (y=y0-ht;y>0;y--){
+    for (y=y0-ht;y>=0;y--){
       yi = y * width;
       yi2 = yi + 2*ht* width;
       for(x=0;x<width;x++){
-	yuv[0][yi+x] = yuv[0][yi2+x]*light_coeff;
+	yuv[0][yi+x] = yuv[0][yi2+x]*light_coeff*light_coeff;
 	yuv[1][yi+x] = yuv[1][yi2+x];
 	yuv[2][yi+x] = yuv[2][yi2+x];
 	
@@ -828,7 +804,7 @@ static void kaleidoscope( VJFrame* frame, const unsigned int type, const int wt_
       yi = y * width;
       yi2 = yi - 2*ht*width;
       for(x=0;x<width;x++){
-	yuv[0][yi+x] = yuv[0][yi2+x]*light_coeff;
+	yuv[0][yi+x] = yuv[0][yi2+x]*light_coeff*light_coeff;
 	yuv[1][yi+x] = yuv[1][yi2+x];
 	yuv[2][yi+x] = yuv[2][yi2+x];
 	
