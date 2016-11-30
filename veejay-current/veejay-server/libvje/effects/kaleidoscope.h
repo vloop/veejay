@@ -23,5 +23,17 @@
 vj_effect *kaleidoscope_init();
 void kaleidoscope_apply( VJFrame *frame, int with_triangles, int wt, int border, int border_r, int border_g, int border_b, int light_pct);
 void kaleidoscope_free();
+int fill_rectangle (uint8_t ** yuv, const unsigned int width,
+		const unsigned int height, const int x0, const int y0,
+		const int x1, const int y1, const uint8_t Y, const uint8_t u,
+		const uint8_t v);
+int fill_hparall (uint8_t ** yuv, const unsigned int width,
+	      const unsigned int height, const int x0, const int y0,
+	      const int x1, const int y1, const int xsize, const uint8_t Y,
+	      const uint8_t u, const uint8_t v);
+int showhexdigits (uint8_t ** yuv, const int width, const int height, const unsigned int digits,
+	       const int x0, const int y0, const int seglen, const int Y,
+	       const int Cb, const int Cr, const float slope, const unsigned int bold);
+
 #endif
 
